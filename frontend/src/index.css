@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 font-sans antialiased selection:bg-purple-600/30 selection:text-purple-300 overflow-x-hidden;
+    background-image: 
+      radial-gradient(circle at 10% 20%, rgba(120, 53, 4, 0.05) 0%, transparent 40%),
+      radial-gradient(circle at 90% 10%, rgba(147, 51, 234, 0.07) 0%, transparent 45%),
+      radial-gradient(circle at 50% 80%, rgba(6, 182, 212, 0.05) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+/* Custom Premium Utilities */
+.glass-panel {
+  @apply bg-slate-900/40 border border-slate-800/80 backdrop-blur-xl rounded-xl shadow-2xl transition-all duration-300;
+}
+
+.glass-panel:hover {
+  @apply border-slate-700/60 shadow-purple-500/5;
+}
+
+.glow-btn-purple {
+  @apply bg-purple-600 hover:bg-purple-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all duration-300 shadow-lg shadow-purple-900/30 hover:shadow-purple-500/20 active:scale-95 flex items-center justify-center gap-2;
+}
+
+.glow-btn-cyan {
+  @apply bg-cyan-600 hover:bg-cyan-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all duration-300 shadow-lg shadow-cyan-900/30 hover:shadow-cyan-500/20 active:scale-95 flex items-center justify-center gap-2;
+}
+
+.glow-btn-danger {
+  @apply bg-rose-600 hover:bg-rose-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all duration-300 shadow-lg shadow-rose-900/30 hover:shadow-rose-500/20 active:scale-95 flex items-center justify-center gap-2;
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-950;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-800 rounded-full hover:bg-slate-700;
+}
+
+/* Animation utilities */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.4);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(147, 51, 234, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(147, 51, 234, 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
+}
+
+.status-badge {
+  @apply px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider inline-flex items-center gap-1.5;
+}
