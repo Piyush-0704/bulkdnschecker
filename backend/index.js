@@ -21,7 +21,7 @@ const io = new Server(server, {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Helper to validate and clean domain input
 function cleanDomain(input) {
