@@ -61,6 +61,12 @@ export default function BulkDnsChecker() {
       console.log('Connected to DNS socket server');
     });
 
+    socketRef.current.on('connect_error', (err) => {
+      console.error('Socket connection error:', err);
+      toast.error('Connection failed! Make sure the backend server is running in your terminal on port 5001.');
+      setIsRunning(false);
+    });
+
     socketRef.current.on('bulk-init', (data) => {
       setStats({
         total: data.total,
@@ -154,17 +160,9 @@ export default function BulkDnsChecker() {
     }
   };
 
-  // Toggle record type selection
+  // Toggle record type selection (Single selection only)
   const toggleRecordType = (type) => {
-    if (recordTypes.includes(type)) {
-      if (recordTypes.length > 1) {
-        setRecordTypes(recordTypes.filter(t => t !== type));
-      } else {
-        toast.error('Select at least one record type.');
-      }
-    } else {
-      setRecordTypes([...recordTypes, type]);
-    }
+    setRecordTypes([type]);
   };
 
   // Start Lookup
