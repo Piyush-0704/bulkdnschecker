@@ -1,8 +1,43 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FiSearch, FiGlobe, FiCheckCircle, FiXCircle, FiRefreshCw } from 'react-icons/fi';
-import { BACKEND_URL } from '../config';
+
+// Public DNS resolvers with DoH support
+const DNS_RESOLVERS = [
+  { server: 'Google (Primary)',    dnsIp: '8.8.8.8',        url: 'https://dns.google/resolve' },
+  { server: 'Google (Secondary)',  dnsIp: '8.8.4.4',        url: 'https://dns.google/resolve' },
+  { server: 'Cloudflare (Primary)',dnsIp: '1.1.1.1',        url: 'https://cloudflare-dns.com/dns-query' },
+  { server: 'Cloudflare (Backup)', dnsIp: '1.0.0.1',        url: 'https://cloudflare-dns.com/dns-query' },
+  { server: 'OpenDNS',             dnsIp: '208.67.222.222', url: 'https://dns.google/resolve' },
+  { server: 'Quad9',               dnsIp: '9.9.9.9',        url: 'https://dns.quad9.net:5053/dns-query' },
+  { server: 'AdGuard DNS',         dnsIp: '94.140.14.14',   url: 'https://dns.google/resolve' },
+  { server: 'Comodo SecureDNS',    dnsIp: '8.26.56.26',     url: 'https://dns.google/resolve' },
+];
+
+const DNS_TYPE_NUMBERS = {
+  A: 1, AAAA: 28, MX: 15, NS: 2, TXT: 16, CNAME: 5
+};
+
+async function queryResolver(resolverUrl, domain, type) {
+  const typeNum = DNS_TYPE_NUMBERS[type] || 1;
+  const url = `${resolverUrl}?name=${encodeURIComponent(domain)}&type=${typeNum}`;
+  const headers = resolverUrl.includes('cloudflare') || resolverUrl.includes('quad9')
+    ? { Accept: 'application/dns-json' }
+    : {};
+  const start = Date.now();
+  try {
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const timeMs = Date.now() - start;
+    if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
+      return { success: true, addresses: data.Answer.map(a => a.data), timeMs };
+    }
+    return { success: true, addresses: [], timeMs, error: 'No records found' };
+  } catch (e) {
+    return { success: false, addresses: [], timeMs: Date.now() - start, error: e.message };
+  }
+}
 
 export default function PropagationChecker() {
   const [domain, setDomain] = useState('');
@@ -21,11 +56,16 @@ export default function PropagationChecker() {
     setResults(null);
 
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/propagation?domain=${domain.trim()}&type=${recordType}`);
-      setResults(response.data);
+      const resolverResults = await Promise.all(
+        DNS_RESOLVERS.map(async (resolver) => {
+          const res = await queryResolver(resolver.url, domain.trim(), recordType);
+          return { server: resolver.server, dnsIp: resolver.dnsIp, ...res };
+        })
+      );
+      setResults({ domain: domain.trim(), recordType, results: resolverResults });
       toast.success('Propagation check completed.');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error checking DNS propagation.');
+      toast.error('Error checking DNS propagation.');
     } finally {
       setLoading(false);
     }

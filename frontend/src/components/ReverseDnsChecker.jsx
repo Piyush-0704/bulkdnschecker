@@ -1,8 +1,29 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FiRefreshCw, FiMapPin, FiActivity } from 'react-icons/fi';
-import { BACKEND_URL } from '../config';
+
+// Convert IP to reverse DNS arpa format for PTR lookups
+function ipToArpa(ip) {
+  // IPv4
+  if (ip.includes('.')) {
+    return ip.split('.').reverse().join('.') + '.in-addr.arpa';
+  }
+  // IPv6: expand, reverse nibbles
+  const expanded = ip.split(':').map(h => h.padStart(4, '0')).join('');
+  return expanded.split('').reverse().join('.') + '.ip6.arpa';
+}
+
+async function reverseDnsLookup(ip) {
+  const arpa = ipToArpa(ip);
+  const url = `https://dns.google/resolve?name=${encodeURIComponent(arpa)}&type=PTR`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`DoH error: HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
+    return { success: true, ip, hostnames: data.Answer.map(a => a.data.replace(/\.$/, '')) };
+  }
+  return { success: false, ip, hostnames: [], error: 'No PTR record found' };
+}
 
 export default function ReverseDnsChecker() {
   const [ipAddress, setIpAddress] = useState('');
@@ -23,17 +44,17 @@ export default function ReverseDnsChecker() {
     setGeoData(null);
 
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/reverse-dns?ip=${ipAddress.trim()}`);
-      if (response.data.success) {
-        setResult(response.data);
+      const res = await reverseDnsLookup(ipAddress.trim());
+      if (res.success) {
+        setResult(res);
         toast.success('Reverse DNS lookup complete.');
-        // Fetch geo data automatically
-        fetchGeo(response.data.ip);
+        fetchGeo(res.ip);
       } else {
-        toast.error('Failed to resolve hostnames.');
+        setResult(res);
+        toast.error(res.error || 'No PTR records found.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error resolving Reverse DNS.');
+      toast.error(err.message || 'Error resolving Reverse DNS.');
     } finally {
       setLoading(false);
     }
@@ -42,8 +63,20 @@ export default function ReverseDnsChecker() {
   const fetchGeo = async (ip) => {
     setLoadingGeo(true);
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/ip-geo?ip=${ip}`);
-      setGeoData(response.data);
+      const resp = await fetch(`https://ipapi.co/${ip}/json/`);
+      const data = await resp.json();
+      if (data && !data.error) {
+        setGeoData({
+          country: data.country_name,
+          countryCode: data.country_code,
+          city: data.city,
+          region: data.region,
+          org: data.org,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          timezone: data.timezone
+        });
+      }
     } catch (err) {
       console.error('Failed to retrieve IP Geo details', err);
     } finally {

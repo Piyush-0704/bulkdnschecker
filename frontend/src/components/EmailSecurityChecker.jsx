@@ -1,8 +1,49 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FiSearch, FiShield, FiAlertTriangle, FiCheckCircle, FiXCircle, FiInfo, FiRefreshCw } from 'react-icons/fi';
-import { BACKEND_URL } from '../config';
+
+async function dohTxt(name) {
+  try {
+    const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=TXT`);
+    const data = await resp.json();
+    if (data.Status === 0 && data.Answer) {
+      return data.Answer.map(a => a.data.replace(/"/g, ''));
+    }
+  } catch {}
+  return [];
+}
+
+async function dohMx(domain) {
+  try {
+    const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=MX`);
+    const data = await resp.json();
+    if (data.Status === 0 && data.Answer) {
+      return data.Answer.map(a => a.data);
+    }
+  } catch {}
+  return [];
+}
+
+async function checkEmailSecurity(domain, dkimSelector) {
+  const [spfRecords, dmarcRecords, dkimRecords, mxRecords] = await Promise.all([
+    dohTxt(domain),
+    dohTxt(`_dmarc.${domain}`),
+    dohTxt(`${dkimSelector}._domainkey.${domain}`),
+    dohMx(domain)
+  ]);
+
+  const spf = spfRecords.find(r => r.startsWith('v=spf1')) || null;
+  const dmarc = dmarcRecords.find(r => r.startsWith('v=DMARC1')) || null;
+  const dkim = dkimRecords.find(r => r.includes('v=DKIM1') || r.includes('p=')) || null;
+
+  return {
+    domain,
+    spf: { record: spf, valid: !!spf },
+    dmarc: { record: dmarc, valid: !!dmarc },
+    dkim: { record: dkim, valid: !!dkim, selector: dkimSelector },
+    mx: mxRecords
+  };
+}
 
 export default function EmailSecurityChecker() {
   const [domain, setDomain] = useState('');
@@ -21,11 +62,11 @@ export default function EmailSecurityChecker() {
     setResult(null);
 
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/email-security?domain=${domain.trim()}&dkimSelector=${dkimSelector.trim()}`);
-      setResult(response.data);
+      const data = await checkEmailSecurity(domain.trim(), dkimSelector.trim() || 'default');
+      setResult(data);
       toast.success('Email security settings verified.');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error resolving mail security keys.');
+      toast.error(err.message || 'Error resolving mail security keys.');
     } finally {
       setLoading(false);
     }
@@ -111,15 +152,15 @@ export default function EmailSecurityChecker() {
                     <FiShield className="text-purple-400" />
                     <span>Sender Policy Framework (SPF)</span>
                   </h3>
-                  {result.spf.found ? (
+                  {result.spf.valid ? (
                     <span className="status-badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Configured</span>
                   ) : (
                     <span className="status-badge bg-rose-500/10 text-rose-400 border border-rose-500/20">Missing</span>
                   )}
                 </div>
-                {result.spf.found ? (
+                {result.spf.valid ? (
                   <pre className="bg-slate-950/80 border border-slate-900 p-4 rounded-xl text-xs font-mono text-cyan-300 break-all select-all shadow-inner">
-                    {result.spf.records.join('\n')}
+                    {result.spf.record}
                   </pre>
                 ) : (
                   <div className="text-xs text-slate-500 italic bg-slate-950/30 p-3 rounded-lg border border-slate-900/60 flex items-center gap-2 font-medium">
@@ -136,20 +177,20 @@ export default function EmailSecurityChecker() {
                     <FiShield className="text-blue-400" />
                     <span>DMARC Authentication policy</span>
                   </h3>
-                  {result.dmarc.found ? (
+                  {result.dmarc.valid ? (
                     <span className="status-badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Configured</span>
                   ) : (
                     <span className="status-badge bg-rose-500/10 text-rose-400 border border-rose-500/20">Missing</span>
                   )}
                 </div>
-                {result.dmarc.found ? (
+                {result.dmarc.valid ? (
                   <pre className="bg-slate-950/80 border border-slate-900 p-4 rounded-xl text-xs font-mono text-cyan-300 break-all select-all shadow-inner">
-                    {result.dmarc.records.join('\n')}
+                    {result.dmarc.record}
                   </pre>
                 ) : (
                   <div className="text-xs text-slate-500 italic bg-slate-950/30 p-3 rounded-lg border border-slate-900/60 flex items-center gap-2 font-medium">
                     <FiAlertTriangle className="text-amber-500 shrink-0 text-sm" />
-                    <span>No DMARC record configured under _dmarc.{domain}. Spoof policies default to none.</span>
+                    <span>No DMARC record configured under _dmarc.{result.domain}. Spoof policies default to none.</span>
                   </div>
                 )}
               </div>
@@ -161,70 +202,41 @@ export default function EmailSecurityChecker() {
                     <FiShield className="text-cyan-400" />
                     <span>DomainKeys Identified Mail (DKIM)</span>
                   </h3>
-                  {result.dkim.found ? (
+                  {result.dkim.valid ? (
                     <span className="status-badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Configured</span>
                   ) : (
                     <span className="status-badge bg-amber-500/10 text-amber-400 border border-amber-500/20">Lookup Failed</span>
                   )}
                 </div>
                 <div className="text-xs text-slate-500 font-semibold mb-1">
-                  Selector: <span className="font-mono text-slate-300">{dkimSelector}</span>
+                  Selector: <span className="font-mono text-slate-300">{result.dkim.selector}</span>
                 </div>
-                {result.dkim.found ? (
+                {result.dkim.valid ? (
                   <pre className="bg-slate-950/80 border border-slate-900 p-4 rounded-xl text-xs font-mono text-cyan-300 break-all select-all shadow-inner">
-                    {result.dkim.records.join('\n')}
+                    {result.dkim.record}
                   </pre>
                 ) : (
                   <div className="text-xs text-slate-500 italic bg-slate-950/30 p-3 rounded-lg border border-slate-900/60 flex items-center gap-2 font-medium">
                     <FiInfo className="text-blue-400 shrink-0 text-sm" />
-                    <span>Could not find DKIM public keys at selector "{dkimSelector}". Try a different selector if active.</span>
+                    <span>Could not find DKIM public keys at selector "{result.dkim.selector}". Try a different selector if active.</span>
                   </div>
                 )}
               </div>
 
-              {/* DNSSEC Panel */}
-              <div className="glass-panel p-6 space-y-3">
-                <div className="flex items-center justify-between">
+              {/* MX Panel */}
+              {result.mx && result.mx.length > 0 && (
+                <div className="glass-panel p-6 space-y-3">
                   <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                     <FiShield className="text-emerald-400" />
-                    <span>DNS Security Extensions (DNSSEC)</span>
+                    <span>MX Records</span>
                   </h3>
-                  {result.dnssec.enabled ? (
-                    <span className="status-badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Enabled</span>
-                  ) : (
-                    <span className="status-badge bg-slate-900 text-slate-500 border border-slate-800">Disabled</span>
-                  )}
+                  <div className="space-y-1.5">
+                    {result.mx.map((mx, i) => (
+                      <div key={i} className="bg-slate-950/80 border border-slate-900 px-3 py-2 rounded-lg font-mono text-xs text-cyan-300">{mx}</div>
+                    ))}
+                  </div>
                 </div>
-                {result.dnssec.enabled ? (
-                  <div className="space-y-2.5">
-                    {result.dnssec.dnskey.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 font-semibold uppercase">DNSKEY Records</span>
-                        <div className="bg-slate-950/80 border border-slate-900 p-3.5 rounded-lg font-mono text-[11px] text-slate-300 overflow-x-auto leading-relaxed shadow-inner">
-                          {result.dnssec.dnskey.map((key, i) => (
-                            <div key={i} className="break-all">Flags: {key.flags}, Protocol: {key.protocol}, Algorithm: {key.algorithm}, Key: {key.key}</div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {result.dnssec.ds.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 font-semibold uppercase">DS Records</span>
-                        <div className="bg-slate-950/80 border border-slate-900 p-3.5 rounded-lg font-mono text-[11px] text-slate-300 overflow-x-auto leading-relaxed shadow-inner">
-                          {result.dnssec.ds.map((ds, i) => (
-                            <div key={i} className="break-all">Key Tag: {ds.keyTag}, Algorithm: {ds.algorithm}, Digest Type: {ds.digestType}, Digest: {ds.digest}</div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-xs text-slate-500 italic bg-slate-950/30 p-3 rounded-lg border border-slate-900/60 flex items-center gap-2 font-medium">
-                    <FiInfo className="text-slate-500 shrink-0 text-sm" />
-                    <span>No active DNSSEC chain signatures found (No DNSKEY/DS records resolved).</span>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
 

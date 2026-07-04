@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { 
@@ -15,7 +14,58 @@ import {
   FiFileText
 } from 'react-icons/fi';
 import DashboardStats from './DashboardStats';
-import { BACKEND_URL } from '../config';
+
+// DNS record type number mapping
+const DNS_TYPE_NUMBERS = {
+  A: 1, AAAA: 28, MX: 15, NS: 2, TXT: 16,
+  CNAME: 5, SOA: 6, SRV: 33, CAA: 257, DNSKEY: 48, DS: 43
+};
+
+// Query DNS-over-HTTPS (Google) for a single domain+type
+async function dohQuery(domain, type) {
+  const typeNum = DNS_TYPE_NUMBERS[type] || 1;
+  const url = `https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=${typeNum}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`DoH HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// Lookup all requested record types for a domain
+async function lookupDomain(domain, recordTypes) {
+  const startTime = Date.now();
+  const records = {};
+  let ip = null;
+  let hasAnyAnswer = false;
+
+  await Promise.all(recordTypes.map(async (type) => {
+    try {
+      const data = await dohQuery(domain, type);
+      // Status 0 = NOERROR, 3 = NXDOMAIN
+      if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
+        hasAnyAnswer = true;
+        records[type] = data.Answer.map(a => a.data);
+        if (type === 'A' && data.Answer.length > 0) {
+          ip = data.Answer[0].data;
+        }
+      } else {
+        records[type] = [];
+      }
+    } catch (e) {
+      records[type] = [];
+    }
+  }));
+
+  return {
+    domain,
+    success: hasAnyAnswer,
+    records,
+    ip: ip || '',
+    country: '',
+    isp: '',
+    ns: records.NS || [],
+    timeMs: Date.now() - startTime
+  };
+}
 
 export default function BulkDnsChecker() {
   const [inputText, setInputText] = useState('');
@@ -161,24 +211,18 @@ export default function BulkDnsChecker() {
 
         if (cancelRef.current) break;
 
-        const startTime = Date.now();
         try {
-          const response = await axios.post(`${BACKEND_URL}/api/dns-lookup`, {
-            domain,
-            recordTypes,
-            dnsServer: resolver
-          });
+          const result = await lookupDomain(domain, recordTypes);
 
           if (cancelRef.current) break;
 
           processed++;
-          const result = response.data;
           if (result.success) {
             successful++;
           } else {
             failed++;
           }
-          totalTime += (Date.now() - startTime);
+          totalTime += result.timeMs;
 
           setStats(prev => ({
             ...prev,
@@ -196,9 +240,9 @@ export default function BulkDnsChecker() {
           const failedResult = {
             domain,
             success: false,
-            error: err.response?.data?.error || err.message,
+            error: err.message,
             records: {},
-            timeMs: Date.now() - startTime
+            timeMs: 0
           };
           setStats(prev => ({
             ...prev,
