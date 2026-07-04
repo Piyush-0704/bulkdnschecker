@@ -53,18 +53,31 @@ async function getIpGeoHelper(ip) {
   }
 
   return new Promise((resolve) => {
+    let resolved = false;
+    
+    // Hard local timeout of 2 seconds to guarantee this promise resolves
+    const hardTimeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.log(`Geolocation query timed out for IP: ${ip}`);
+        resolve({ country: 'United States', countryCode: 'US', org: 'Unknown Provider' });
+      }
+    }, 2000);
+
     const options = {
       hostname: 'ipapi.co',
       path: `/${ip}/json/`,
       method: 'GET',
-      headers: { 'User-Agent': 'nodejs-dns-checker' },
-      timeout: 3000
+      headers: { 'User-Agent': 'nodejs-dns-checker' }
     };
 
     const req = https.get(options, (res) => {
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => {
+        clearTimeout(hardTimeout);
+        if (resolved) return;
+        resolved = true;
         try {
           const data = JSON.parse(raw);
           if (data && data.country_name) {
@@ -83,11 +96,9 @@ async function getIpGeoHelper(ip) {
     });
 
     req.on('error', () => {
-      resolve({ country: 'United States', countryCode: 'US', org: 'Unknown Provider' });
-    });
-
-    req.on('timeout', () => {
-      req.destroy();
+      clearTimeout(hardTimeout);
+      if (resolved) return;
+      resolved = true;
       resolve({ country: 'United States', countryCode: 'US', org: 'Unknown Provider' });
     });
   });
