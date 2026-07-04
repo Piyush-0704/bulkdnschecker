@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import axios from 'axios';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { 
@@ -49,71 +49,9 @@ export default function BulkDnsChecker() {
   
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
-  const socketRef = useRef(null);
+  const cancelRef = useRef(false);
 
   const availableRecordTypes = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME', 'SOA', 'SRV', 'CAA', 'DNSKEY', 'DS'];
-
-  useEffect(() => {
-    // Connect to Socket.IO backend
-    socketRef.current = io(BACKEND_URL);
-
-    socketRef.current.on('connect', () => {
-      console.log('Connected to DNS socket server');
-    });
-
-    socketRef.current.on('connect_error', (err) => {
-      console.error('Socket connection error:', err);
-      toast.error('Connection failed! Make sure the backend server is running in your terminal on port 5001.');
-      setIsRunning(false);
-    });
-
-    socketRef.current.on('bulk-init', (data) => {
-      setStats({
-        total: data.total,
-        processed: 0,
-        successful: 0,
-        failed: 0,
-        avgTimeMs: 0
-      });
-      setResults([]);
-      setExpandedRows({});
-      setSelectedDomains([]);
-    });
-
-    socketRef.current.on('bulk-progress', (data) => {
-      setStats(prev => ({
-        ...prev,
-        processed: data.processed,
-        successful: data.successful,
-        failed: data.failed
-      }));
-      setResults(prev => [data.currentResult, ...prev]);
-    });
-
-    socketRef.current.on('bulk-dns-complete', (data) => {
-      setIsRunning(false);
-      setStats(prev => ({
-        ...prev,
-        avgTimeMs: data.avgTimeMs
-      }));
-      toast.success('Bulk DNS check completed successfully!');
-    });
-
-    socketRef.current.on('bulk-cancelled', (msg) => {
-      setIsRunning(false);
-      toast.error(msg);
-    });
-
-    socketRef.current.on('bulk-error', (msg) => {
-      toast.error(msg);
-    });
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
-  }, []);
 
   // Handle file import
   const handleFileUpload = (e) => {
@@ -166,7 +104,7 @@ export default function BulkDnsChecker() {
   };
 
   // Start Lookup
-  const handleStart = () => {
+  const handleStart = async () => {
     if (!inputText.trim()) {
       toast.error('Please input or upload at least one domain.');
       return;
@@ -177,7 +115,10 @@ export default function BulkDnsChecker() {
       .map(d => d.trim())
       .filter(Boolean);
 
-    if (domains.length === 0) {
+    const uniqueDomains = Array.from(new Set(domains));
+    const total = uniqueDomains.length;
+
+    if (total === 0) {
       toast.error('No valid domains found.');
       return;
     }
@@ -191,19 +132,108 @@ export default function BulkDnsChecker() {
     setIsRunning(true);
     setResults([]);
     setExpandedRows({});
-    
-    socketRef.current.emit('start-bulk-dns', {
-      domains,
-      recordTypes,
-      dnsServer: resolver,
-      concurrency,
-      delay
+    cancelRef.current = false;
+
+    setStats({
+      total,
+      processed: 0,
+      successful: 0,
+      failed: 0,
+      avgTimeMs: 0
     });
+
+    let processed = 0;
+    let successful = 0;
+    let failed = 0;
+    let totalTime = 0;
+    let index = 0;
+
+    // Concurrency queue worker
+    const worker = async () => {
+      while (index < uniqueDomains.length && !cancelRef.current) {
+        const currentIdx = index++;
+        if (currentIdx >= uniqueDomains.length) break;
+        const domain = uniqueDomains[currentIdx];
+
+        if (delay > 0 && currentIdx > 0) {
+          await new Promise(r => setTimeout(r, delay));
+        }
+
+        if (cancelRef.current) break;
+
+        const startTime = Date.now();
+        try {
+          const response = await axios.post(`${BACKEND_URL}/api/dns-lookup`, {
+            domain,
+            recordTypes,
+            dnsServer: resolver
+          });
+
+          if (cancelRef.current) break;
+
+          processed++;
+          const result = response.data;
+          if (result.success) {
+            successful++;
+          } else {
+            failed++;
+          }
+          totalTime += (Date.now() - startTime);
+
+          setStats(prev => ({
+            ...prev,
+            processed,
+            successful,
+            failed
+          }));
+          setResults(prev => [result, ...prev]);
+
+        } catch (err) {
+          if (cancelRef.current) break;
+
+          processed++;
+          failed++;
+          const failedResult = {
+            domain,
+            success: false,
+            error: err.response?.data?.error || err.message,
+            records: {},
+            timeMs: Date.now() - startTime
+          };
+          setStats(prev => ({
+            ...prev,
+            processed,
+            successful,
+            failed
+          }));
+          setResults(prev => [failedResult, ...prev]);
+        }
+      }
+    };
+
+    // Spawn workers based on concurrency setting
+    const numWorkers = Math.min(concurrency, total);
+    const workers = Array.from({ length: numWorkers }, () => worker());
+
+    await Promise.all(workers);
+
+    setIsRunning(false);
+    
+    if (cancelRef.current) {
+      toast.error('Bulk DNS check cancelled.');
+    } else {
+      setStats(prev => ({
+        ...prev,
+        avgTimeMs: processed > 0 ? Math.round(totalTime / processed) : 0
+      }));
+      toast.success('Bulk DNS check completed successfully!');
+    }
   };
 
   // Cancel Lookup
   const handleCancel = () => {
-    socketRef.current.emit('cancel-bulk-dns');
+    cancelRef.current = true;
+    setIsRunning(false);
   };
 
   // Toggle Row Expand

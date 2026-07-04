@@ -485,12 +485,27 @@ async function checkIpBlacklist(ip) {
 
 // 7. REST APIs
 app.post('/api/dns-lookup', async (req, res) => {
-  const { domain, recordTypes } = req.body;
+  const { domain, recordTypes, dnsServer = '' } = req.body;
   const clean = cleanDomain(domain);
   if (!clean) return res.status(400).json({ error: 'Invalid domain name format' });
   const types = recordTypes || ['A'];
-  const data = await lookupDomainRecords(clean, types);
-  res.json(data);
+  
+  let activeResolver = dns;
+  if (dnsServer) {
+    try {
+      activeResolver = new Resolver();
+      activeResolver.setServers([dnsServer]);
+    } catch (err) {
+      activeResolver = dns;
+    }
+  }
+
+  try {
+    const data = await lookupDomainRecords(clean, types, activeResolver);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/reverse-dns', async (req, res) => {
