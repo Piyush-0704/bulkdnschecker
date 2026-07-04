@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import Sidebar from './components/Sidebar';
 import BulkDnsChecker from './components/BulkDnsChecker';
@@ -10,9 +10,13 @@ import EmailSecurityChecker from './components/EmailSecurityChecker';
 import HeaderAnalyzer from './components/HeaderAnalyzer';
 import SmtpBlacklistChecker from './components/SmtpBlacklistChecker';
 import ApiDocs from './components/ApiDocs';
+import { wakeBackend } from './config';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('bulk-dns');
+
+  // Warm up the Hugging Face backend on page load
+  useEffect(() => { wakeBackend(); }, []);
 
   // Render correct component based on active tab
   const renderActiveView = () => {
