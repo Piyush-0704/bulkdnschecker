@@ -6,9 +6,4 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
   ],
-  server: {
-    host: 'bulkdnschecker',
-    port: 80,
-    strictPort: true
-  }
 })
