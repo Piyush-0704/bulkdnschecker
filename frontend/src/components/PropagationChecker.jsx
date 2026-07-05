@@ -2,31 +2,39 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiSearch, FiGlobe, FiCheckCircle, FiXCircle, FiRefreshCw } from 'react-icons/fi';
 
-// Public DNS resolvers with DoH support
+// Public DNS resolvers with global geographic presence (via EDNS Client Subnet)
 const DNS_RESOLVERS = [
-  { server: 'Google (Primary)',    dnsIp: '8.8.8.8',        url: 'https://dns.google/resolve' },
-  { server: 'Google (Secondary)',  dnsIp: '8.8.4.4',        url: 'https://dns.google/resolve' },
-  { server: 'Cloudflare (Primary)',dnsIp: '1.1.1.1',        url: 'https://cloudflare-dns.com/dns-query' },
-  { server: 'Cloudflare (Backup)', dnsIp: '1.0.0.1',        url: 'https://cloudflare-dns.com/dns-query' },
-  { server: 'OpenDNS',             dnsIp: '208.67.222.222', url: 'https://dns.google/resolve' },
-  { server: 'Quad9',               dnsIp: '9.9.9.9',        url: 'https://dns.quad9.net:5053/dns-query' },
-  { server: 'AdGuard DNS',         dnsIp: '94.140.14.14',   url: 'https://dns.google/resolve' },
-  { server: 'Comodo SecureDNS',    dnsIp: '8.26.56.26',     url: 'https://dns.google/resolve' },
+  { server: 'Google US (New York)',      dnsIp: '8.8.8.8',        url: 'https://dns.google/resolve', ecs: '8.8.8.8' },
+  { server: 'Google EU (Frankfurt)',     dnsIp: '46.38.160.0',    url: 'https://dns.google/resolve', ecs: '46.38.160.0' },
+  { server: 'Google Asia (Mumbai)',      dnsIp: '103.111.0.0',    url: 'https://dns.google/resolve', ecs: '103.111.0.0' },
+  { server: 'Google Japan (Tokyo)',      dnsIp: '103.2.28.0',     url: 'https://dns.google/resolve', ecs: '103.2.28.0' },
+  { server: 'Google SA (São Paulo)',    dnsIp: '177.100.0.0',    url: 'https://dns.google/resolve', ecs: '177.100.0.0' },
+  { server: 'Google Oceania (Sydney)',   dnsIp: '101.160.0.0',    url: 'https://dns.google/resolve', ecs: '101.160.0.0' },
+  { server: 'Cloudflare DNS (Global)',   dnsIp: '1.1.1.1',        url: 'https://cloudflare-dns.com/dns-query' },
+  { server: 'Quad9 DNS (Global)',        dnsIp: '9.9.9.9',        url: 'https://dns.quad9.net/dns-query' },
 ];
 
 const DNS_TYPE_NUMBERS = {
   A: 1, AAAA: 28, MX: 15, NS: 2, TXT: 16, CNAME: 5
 };
 
-async function queryResolver(resolverUrl, domain, type) {
+async function queryResolver(resolverUrl, domain, type, ecs) {
   const typeNum = DNS_TYPE_NUMBERS[type] || 1;
-  const url = `${resolverUrl}?name=${encodeURIComponent(domain)}&type=${typeNum}`;
+  let url = `${resolverUrl}?name=${encodeURIComponent(domain)}&type=${typeNum}`;
+  if (ecs) {
+    url += `&edns_client_subnet=${encodeURIComponent(ecs)}`;
+  }
   const headers = resolverUrl.includes('cloudflare') || resolverUrl.includes('quad9')
     ? { Accept: 'application/dns-json' }
     : {};
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000); // 4-second timeout
+  
   const start = Date.now();
   try {
-    const resp = await fetch(url, { headers });
+    const resp = await fetch(url, { headers, signal: controller.signal });
+    clearTimeout(timeoutId);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const timeMs = Date.now() - start;
@@ -35,7 +43,9 @@ async function queryResolver(resolverUrl, domain, type) {
     }
     return { success: true, addresses: [], timeMs, error: 'No records found' };
   } catch (e) {
-    return { success: false, addresses: [], timeMs: Date.now() - start, error: e.message };
+    clearTimeout(timeoutId);
+    const errorMsg = e.name === 'AbortError' ? 'Timeout' : e.message;
+    return { success: false, addresses: [], timeMs: Date.now() - start, error: errorMsg };
   }
 }
 
@@ -58,8 +68,8 @@ export default function PropagationChecker() {
     try {
       const resolverResults = await Promise.all(
         DNS_RESOLVERS.map(async (resolver) => {
-          const res = await queryResolver(resolver.url, domain.trim(), recordType);
-          return { server: resolver.server, dnsIp: resolver.dnsIp, ...res };
+          const res = await queryResolver(resolver.url, domain.trim(), recordType, resolver.ecs);
+          return { server: resolver.server, dnsIp: resolver.ecs || resolver.dnsIp, ...res };
         })
       );
       setResults({ domain: domain.trim(), recordType, results: resolverResults });
