@@ -111,7 +111,7 @@ export default function BulkDnsChecker() {
     domain: true,
     country: true,
     isp: true,
-    ns: true
+    records: true
   });
   
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
@@ -365,6 +365,10 @@ export default function BulkDnsChecker() {
         } else if (sortConfig.key === 'ns') {
           aVal = (a.ns || []).join(', ');
           bVal = (b.ns || []).join(', ');
+        } else if (sortConfig.key.startsWith('record_')) {
+          const type = sortConfig.key.substring(7);
+          aVal = (a.records?.[type] || []).join(', ');
+          bVal = (b.records?.[type] || []).join(', ');
         } else {
           aVal = a[sortConfig.key] || '';
           bVal = b[sortConfig.key] || '';
@@ -801,23 +805,24 @@ export default function BulkDnsChecker() {
                       </th>
                     )}
                     
-                    {visibleColumns.ns && (
+                    {visibleColumns.records && recordTypes.map((type) => (
                       <th 
-                        onClick={() => requestSort('ns')} 
+                        key={type}
+                        onClick={() => requestSort(`record_${type}`)} 
                         className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200"
                       >
                         <div className="flex items-center gap-1">
-                          <span>NS Record</span>
+                          <span>{type} Record</span>
                           <span className="text-[10px] text-slate-600">⇅</span>
                         </div>
                       </th>
-                    )}
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900/40">
                   {sortedResults.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-12 text-center text-slate-600 text-sm font-semibold">
+                      <td colSpan={1 + (visibleColumns.ip ? 1 : 0) + (visibleColumns.domain ? 1 : 0) + (visibleColumns.country ? 1 : 0) + (visibleColumns.isp ? 1 : 0) + (visibleColumns.records ? recordTypes.length : 0)} className="p-12 text-center text-slate-600 text-sm font-semibold">
                         No matching records found.
                       </td>
                     </tr>
@@ -830,7 +835,7 @@ export default function BulkDnsChecker() {
                         (visibleColumns.domain ? 1 : 0) + 
                         (visibleColumns.country ? 1 : 0) + 
                         (visibleColumns.isp ? 1 : 0) + 
-                        (visibleColumns.ns ? 1 : 0);
+                        (visibleColumns.records ? recordTypes.length : 0);
 
                       return (
                         <React.Fragment key={idx}>
@@ -889,22 +894,23 @@ export default function BulkDnsChecker() {
                               </td>
                             )}
 
-                            {visibleColumns.ns && (
+                            {visibleColumns.records && recordTypes.map((type) => (
                               <td 
+                                key={type}
                                 onClick={() => toggleRow(item.domain)}
                                 className="p-4 cursor-pointer"
                               >
-                                <div className="font-mono text-xs text-slate-400 space-y-0.5 leading-normal">
-                                  {item.ns && item.ns.length > 0 ? (
-                                    item.ns.map((nsVal, i) => (
-                                      <div key={i}>{nsVal}</div>
+                                <div className="font-mono text-xs text-slate-400 space-y-0.5 leading-normal max-w-xs">
+                                  {item.records?.[type] && item.records[type].length > 0 ? (
+                                    item.records[type].map((val, i) => (
+                                      <div key={i} className="truncate" title={val}>{val}</div>
                                     ))
                                   ) : (
-                                    <span className="text-slate-600 italic">No NS records</span>
+                                    <span className="text-slate-600 italic">No {type} records</span>
                                   )}
                                 </div>
                               </td>
-                            )}
+                            ))}
                           </tr>
                           {isExpanded && (
                             <tr className="bg-slate-900/10 border-l-2 border-purple-500">
@@ -973,7 +979,7 @@ export default function BulkDnsChecker() {
                       onChange={() => setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }))}
                       className="rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer"
                     />
-                    <span className="uppercase">{col === 'isp' ? 'ISP' : col}</span>
+                    <span className="uppercase">{col === 'isp' ? 'ISP' : (col === 'records' ? 'Records' : col)}</span>
                   </label>
                 ))}
               </div>
