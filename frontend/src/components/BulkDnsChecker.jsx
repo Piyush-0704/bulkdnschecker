@@ -37,7 +37,10 @@ async function lookupDomain(domain, recordTypes) {
   let ip = null;
   let hasAnyAnswer = false;
 
-  await Promise.all(recordTypes.map(async (type) => {
+  // Always include NS in queries for the NS column, even if user didn't select it
+  const queryTypes = recordTypes.includes('NS') ? recordTypes : [...recordTypes, 'NS'];
+
+  await Promise.all(queryTypes.map(async (type) => {
     try {
       const data = await dohQuery(domain, type);
       // Status 0 = NOERROR, 3 = NXDOMAIN
@@ -55,13 +58,27 @@ async function lookupDomain(domain, recordTypes) {
     }
   }));
 
+  // GeoIP lookup if we have an IP (use ip-api.com — free, CORS-enabled)
+  let country = '';
+  let isp = '';
+  if (ip) {
+    try {
+      const geoResp = await fetch(`http://ip-api.com/json/${ip}?fields=country,isp`);
+      if (geoResp.ok) {
+        const geo = await geoResp.json();
+        country = geo.country || '';
+        isp = geo.isp || '';
+      }
+    } catch {}
+  }
+
   return {
     domain,
     success: hasAnyAnswer,
     records,
     ip: ip || '',
-    country: '',
-    isp: '',
+    country,
+    isp,
     ns: records.NS || [],
     timeMs: Date.now() - startTime
   };

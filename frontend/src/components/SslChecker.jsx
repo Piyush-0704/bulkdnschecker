@@ -1,8 +1,87 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FiSearch, FiLock, FiUnlock, FiCalendar, FiShield, FiClock } from 'react-icons/fi';
-import { BACKEND_URL } from '../config';
+
+// Check SSL certificate via Certificate Transparency logs (crt.sh) and direct HTTPS fetch
+async function checkSsl(domain) {
+  const startTime = Date.now();
+  const cleanDomain = domain.replace(/^https?:\/\//, '').split('/')[0];
+
+  // 1. Check HTTPS connectivity
+  let httpsOk = false;
+  try {
+    const resp = await fetch(`https://${cleanDomain}`, { method: 'HEAD', mode: 'no-cors' });
+    httpsOk = true; // no-cors mode means any response (even opaque) = success
+  } catch {
+    httpsOk = false;
+  }
+
+  // 2. Get certificate details from crt.sh CT logs
+  let certData = null;
+  try {
+    const resp = await fetch(`https://crt.sh/?q=${encodeURIComponent(cleanDomain)}&output=json&exclude=expired`);
+    if (resp.ok) {
+      const certs = await resp.json();
+      if (certs && certs.length > 0) {
+        // Get the most recent certificate
+        const latest = certs[0];
+        certData = {
+          subject: { CN: latest.common_name || cleanDomain },
+          issuer: { O: latest.issuer_name?.split(',').find(p => p.trim().startsWith('O='))?.split('=')[1]?.trim() || latest.issuer_name || 'Unknown' },
+          validFrom: latest.not_before,
+          validTo: latest.not_after,
+          serialNumber: latest.serial_number || 'N/A',
+        };
+      }
+    }
+  } catch {
+    // crt.sh may be slow or unavailable
+  }
+
+  // 3. If crt.sh failed, try a DNS-based approach (CAA records can tell us the CA)
+  if (!certData) {
+    try {
+      const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(cleanDomain)}&type=CAA`);
+      const data = await resp.json();
+      const caaRecords = data.Answer?.map(a => a.data) || [];
+      certData = {
+        subject: { CN: cleanDomain },
+        issuer: { O: caaRecords.length > 0 ? caaRecords.join(', ') : (httpsOk ? 'Certificate present (details unavailable)' : 'Unknown') },
+        validFrom: null,
+        validTo: null,
+        serialNumber: 'N/A',
+      };
+    } catch {
+      certData = {
+        subject: { CN: cleanDomain },
+        issuer: { O: httpsOk ? 'Certificate present' : 'Unknown' },
+        validFrom: null,
+        validTo: null,
+        serialNumber: 'N/A',
+      };
+    }
+  }
+
+  const now = new Date();
+  const validTo = certData.validTo ? new Date(certData.validTo) : null;
+  const validFrom = certData.validFrom ? new Date(certData.validFrom) : null;
+  const daysRemaining = validTo ? Math.floor((validTo - now) / (1000 * 60 * 60 * 24)) : (httpsOk ? 999 : -1);
+
+  return {
+    success: httpsOk || !!certData.validTo,
+    timeMs: Date.now() - startTime,
+    validity: {
+      authorized: httpsOk,
+      daysRemaining,
+      subject: certData.subject,
+      issuer: certData.issuer,
+      validFrom: certData.validFrom || 'Unknown',
+      validTo: certData.validTo || 'Unknown',
+      serialNumber: certData.serialNumber,
+    },
+    error: !httpsOk && !certData.validTo ? 'Could not verify HTTPS connection or find certificate data.' : null,
+  };
+}
 
 export default function SslChecker() {
   const [domain, setDomain] = useState('');
@@ -20,15 +99,15 @@ export default function SslChecker() {
     setResult(null);
 
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/ssl-check?domain=${domain.trim()}`);
-      setResult(response.data);
-      if (response.data.success) {
+      const data = await checkSsl(domain.trim());
+      setResult(data);
+      if (data.success) {
         toast.success('SSL verification completed.');
       } else {
-        toast.error(`SSL check failed: ${response.data.error}`);
+        toast.error(data.error || 'SSL check failed.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error checking SSL certificate.');
+      toast.error(err.message || 'Error checking SSL certificate.');
     } finally {
       setLoading(false);
     }

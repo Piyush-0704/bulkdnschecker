@@ -1,8 +1,52 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FiSearch, FiGlobe, FiCalendar, FiClock, FiFileText } from 'react-icons/fi';
-import { BACKEND_URL } from '../config';
+
+// RDAP (Registration Data Access Protocol) — the modern WHOIS replacement
+// Uses structured JSON from rdap.org, which proxies to the authoritative RDAP server
+async function rdapLookup(domain) {
+  const resp = await fetch(`https://rdap.org/domain/${encodeURIComponent(domain)}`);
+  if (!resp.ok) throw new Error(`RDAP error: HTTP ${resp.status}`);
+  const data = await resp.json();
+
+  // Extract registrar
+  const registrarEntity = data.entities?.find(e => e.roles?.includes('registrar'));
+  const registrar = registrarEntity?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || 'N/A';
+
+  // Extract events
+  const getEvent = (action) => data.events?.find(e => e.eventAction === action)?.eventDate || null;
+
+  // Extract nameservers
+  const nameservers = data.nameservers?.map(ns => ns.ldhName) || [];
+
+  // Extract status
+  const status = data.status || [];
+
+  // Build raw text representation
+  const rawLines = [
+    `Domain Name: ${data.ldhName || domain}`,
+    `Registrar: ${registrar}`,
+    `Status: ${status.join(', ')}`,
+    `Registration Date: ${getEvent('registration') || 'N/A'}`,
+    `Expiration Date: ${getEvent('expiration') || 'N/A'}`,
+    `Last Updated: ${getEvent('last changed') || 'N/A'}`,
+    `Nameservers: ${nameservers.join(', ')}`,
+    `DNSSEC: ${data.secureDNS?.delegationSigned ? 'Signed' : 'Unsigned'}`,
+  ];
+
+  return {
+    success: true,
+    domain: data.ldhName || domain,
+    registrar,
+    creationDate: getEvent('registration'),
+    expirationDate: getEvent('expiration'),
+    updatedDate: getEvent('last changed'),
+    nameservers,
+    status,
+    dnssec: data.secureDNS?.delegationSigned ? 'Signed' : 'Unsigned',
+    raw: rawLines.join('\n'),
+  };
+}
 
 export default function WhoisChecker() {
   const [domain, setDomain] = useState('');
@@ -20,68 +64,17 @@ export default function WhoisChecker() {
     setResult(null);
 
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/whois?domain=${domain.trim()}`);
-      if (response.data.success) {
-        setResult(response.data);
-        toast.success('WHOIS data retrieved successfully.');
-      } else {
-        toast.error('Failed to query WHOIS records.');
-      }
+      const data = await rdapLookup(domain.trim());
+      setResult(data);
+      toast.success('WHOIS / RDAP data retrieved successfully.');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error retrieving WHOIS data.');
+      toast.error(err.message || 'Error retrieving WHOIS data.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Helper to extract common WHOIS values using regex
-  const parseWhois = (rawText) => {
-    if (!rawText) return {};
-    
-    const findValue = (patterns) => {
-      for (const pattern of patterns) {
-        const match = rawText.match(pattern);
-        if (match && match[1]) {
-          return match[1].trim();
-        }
-      }
-      return 'Not Found';
-    };
-
-    return {
-      registrar: findValue([
-        /Registrar:\s*([^\r\n]+)/i,
-        /Sponsoring Registrar:\s*([^\r\n]+)/i,
-        /registrar name:\s*([^\r\n]+)/i
-      ]),
-      created: findValue([
-        /Creation Date:\s*([^\r\n]+)/i,
-        /Created On:\s*([^\r\n]+)/i,
-        /Registration Time:\s*([^\r\n]+)/i,
-        /registered:\s*([^\r\n]+)/i
-      ]),
-      expires: findValue([
-        /Registry Expiry Date:\s*([^\r\n]+)/i,
-        /Expiration Date:\s*([^\r\n]+)/i,
-        /Registrar Registration Expiration Date:\s*([^\r\n]+)/i,
-        /expire:\s*([^\r\n]+)/i
-      ]),
-      status: findValue([
-        /Domain Status:\s*([^\r\n]+)/i,
-        /status:\s*([^\r\n]+)/i
-      ]),
-      registrantOrg: findValue([
-        /Registrant Organization:\s*([^\r\n]+)/i,
-        /registrant-organization:\s*([^\r\n]+)/i
-      ]),
-      registrantCountry: findValue([
-        /Registrant Country:\s*([^\r\n]+)/i,
-        /registrant-country:\s*([^\r\n]+)/i
-      ]),
-    };
-  };
-
-  const parsedData = result ? parseWhois(result.data) : {};
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { dateStyle: 'long' }) : 'N/A';
 
   return (
     <div className="space-y-6">
@@ -146,7 +139,7 @@ export default function WhoisChecker() {
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-[10px] text-slate-500 font-semibold uppercase">Registrar</span>
-                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={parsedData.registrar}>{parsedData.registrar}</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={result.registrar}>{result.registrar}</span>
                     </div>
                   </div>
 
@@ -156,8 +149,8 @@ export default function WhoisChecker() {
                       <FiFileText className="text-lg" />
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-[10px] text-slate-500 font-semibold uppercase">Registrant Org</span>
-                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={parsedData.registrantOrg}>{parsedData.registrantOrg} {parsedData.registrantCountry !== 'Not Found' ? `(${parsedData.registrantCountry})` : ''}</span>
+                      <span className="text-[10px] text-slate-500 font-semibold uppercase">Status / DNSSEC</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate">{result.dnssec} · {result.status?.length || 0} flags</span>
                     </div>
                   </div>
 
@@ -168,7 +161,7 @@ export default function WhoisChecker() {
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-[10px] text-slate-500 font-semibold uppercase">Creation Date</span>
-                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={parsedData.created}>{parsedData.created}</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate">{formatDate(result.creationDate)}</span>
                     </div>
                   </div>
 
@@ -179,7 +172,7 @@ export default function WhoisChecker() {
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-[10px] text-slate-500 font-semibold uppercase">Expiration Date</span>
-                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={parsedData.expires}>{parsedData.expires}</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate">{formatDate(result.expirationDate)}</span>
                     </div>
                   </div>
                 </div>
@@ -193,7 +186,7 @@ export default function WhoisChecker() {
                 </div>
                 
                 <pre className="bg-slate-950/80 border border-slate-900/80 p-5 rounded-xl text-xs font-mono text-slate-300 leading-relaxed overflow-y-auto max-h-[400px] shadow-inner select-text">
-                  {result.data}
+                  {result.raw}
                 </pre>
               </div>
             </div>
