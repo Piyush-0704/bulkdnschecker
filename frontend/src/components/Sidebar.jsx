@@ -15,7 +15,7 @@ import {
 export default function Sidebar({ activeTab, setActiveTab }) {
   const menuItems = [
     { id: 'bulk-dns', name: 'Bulk DNS Lookup', icon: FiGrid, description: 'Query thousands of domains' },
-    { id: 'reverse-dns', name: 'Reverse DNS', icon: FiRefreshCw, description: 'Resolve IPs to Hostnames' },
+    { id: 'reverse-dns', name: 'Reverse DNS', icon: FiRefreshCw, description: 'Bulk resolve IPs to Hostnames' },
     { id: 'whois', name: 'WHOIS Lookup', icon: FiSearch, description: 'Domain ownership lookup' },
     { id: 'ssl-check', name: 'SSL Certificate Checker', icon: FiLock, description: 'Verify TLS certificates' },
     { id: 'propagation', name: 'DNS Propagation', icon: FiGlobe, description: 'Global DNS check' },
