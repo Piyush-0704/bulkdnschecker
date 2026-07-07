@@ -44,6 +44,25 @@ async function rdapLookup(domain) {
     registrantName = extractNameFromEntity(nestedRegistrant);
   }
 
+  // Fallback: Query registrar's authoritative RDAP server directly if link is provided (bypasses registry redactions)
+  if (!registrantName && registrarEntity) {
+    const rdapLink = registrarEntity.links?.find(l => 
+      (l.value && l.value.startsWith('https://rdap.')) || 
+      (l.href && l.href.startsWith('https://rdap.'))
+    );
+    const baseUrl = rdapLink ? (rdapLink.value || rdapLink.href) : null;
+    if (baseUrl) {
+      try {
+        const subResp = await fetch(`${baseUrl}domain/${encodeURIComponent(domain.trim().toLowerCase())}`);
+        if (subResp.ok) {
+          const subData = await subResp.json();
+          const subRegistrant = subData.entities?.find(e => e.roles?.includes('registrant'));
+          registrantName = extractNameFromEntity(subRegistrant);
+        }
+      } catch {}
+    }
+  }
+
   // Extract events
   const getEvent = (action) => data.events?.find(e => e.eventAction === action)?.eventDate || null;
 
