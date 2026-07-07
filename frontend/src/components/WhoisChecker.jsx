@@ -390,7 +390,7 @@ export default function WhoisChecker() {
                 </div>
                 
                 <pre className="bg-slate-950/80 border border-slate-900/80 p-5 rounded-xl text-xs font-mono text-slate-300 leading-relaxed overflow-y-auto max-h-[400px] shadow-inner select-text whitespace-pre-wrap break-all">
-                  {result.rawWhois || result.raw}
+                  {(!result.rawWhois || result.rawWhois.startsWith('Error retrieving WHOIS data')) ? result.raw : result.rawWhois}
                 </pre>
               </div>
             </div>
