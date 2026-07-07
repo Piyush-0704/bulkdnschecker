@@ -14,17 +14,34 @@ async function rdapLookup(domain) {
   const registrarEntity = data.entities?.find(e => e.roles?.includes('registrar'));
   const registrar = registrarEntity?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || 'N/A';
 
-  // Extract registrant from RDAP (often redacted due to GDPR)
+  // Extract registrant from RDAP (often redacted due to GDPR, but organization/company is sometimes left public)
   let registrantName = null;
+  
+  const isRedacted = (val) => !val || 
+    val.toLowerCase().includes('redacted') || 
+    val.toLowerCase().includes('privacy') || 
+    val.toLowerCase().includes('protected') ||
+    val.toLowerCase().includes('not disclosed') ||
+    val.toLowerCase().includes('data protected') ||
+    val.toLowerCase() === 'n/a';
+
+  const extractNameFromEntity = (entity) => {
+    if (!entity) return null;
+    const vcards = entity?.vcardArray?.[1] || [];
+    const fnVal = vcards.find(v => v[0] === 'fn')?.[3];
+    const orgVal = vcards.find(v => v[0] === 'org')?.[3];
+    
+    if (fnVal && !isRedacted(fnVal)) return fnVal;
+    if (orgVal && !isRedacted(orgVal)) return orgVal;
+    return null;
+  };
+
   const registrantEntity = data.entities?.find(e => e.roles?.includes('registrant'));
-  if (registrantEntity) {
-    registrantName = registrantEntity?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || null;
-  }
+  registrantName = extractNameFromEntity(registrantEntity);
+
   if (!registrantName && registrarEntity?.entities) {
     const nestedRegistrant = registrarEntity.entities.find(e => e.roles?.includes('registrant'));
-    if (nestedRegistrant) {
-      registrantName = nestedRegistrant?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || null;
-    }
+    registrantName = extractNameFromEntity(nestedRegistrant);
   }
 
   // Extract events
