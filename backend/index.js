@@ -256,7 +256,9 @@ async function getWhoisData(domain) {
     }
     return rawIana;
   } catch (err) {
-    return `Error retrieving WHOIS data: ${err.message}`;
+    console.error("WHOIS query error:", err);
+    const msg = err ? (err.message || err.code || String(err)) : 'Unknown error';
+    return `Error retrieving WHOIS data: ${msg}`;
   }
 }
 
