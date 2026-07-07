@@ -40,7 +40,30 @@ async function checkDnsbl(ip, dnsbl) {
     const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(query)}&type=A`);
     const data = await resp.json();
     if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
-      return { dnsbl, blacklisted: true, result: data.Answer[0].data };
+      const resultIp = data.Answer[0].data;
+      let blacklisted = false;
+
+      // Filter out query block/refused codes (e.g. 127.255.255.254 or 127.0.0.1 for blocked)
+      if (dnsbl.includes('spamhaus.org')) {
+        if ((resultIp.startsWith('127.0.0.') || resultIp.startsWith('127.0.1.')) && 
+            resultIp !== '127.255.255.252' && 
+            resultIp !== '127.255.255.254' && 
+            resultIp !== '127.255.255.255') {
+          blacklisted = true;
+        }
+      } else if (dnsbl === 'bl.spamcop.net') {
+        if (resultIp === '127.0.0.2') {
+          blacklisted = true;
+        }
+      } else if (resultIp.startsWith('127.')) {
+        if (resultIp !== '127.255.255.252' && 
+            resultIp !== '127.255.255.254' && 
+            resultIp !== '127.255.255.255' && 
+            resultIp !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      }
+      return { dnsbl, blacklisted, result: resultIp };
     }
     return { dnsbl, blacklisted: false };
   } catch {
@@ -54,7 +77,45 @@ async function checkDomainBlacklist(domain, blacklistHost) {
     const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(query)}&type=A`);
     const data = await resp.json();
     if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
-      return { host: blacklistHost, blacklisted: true, result: data.Answer[0].data };
+      const ip = data.Answer[0].data;
+      let blacklisted = false;
+
+      if (blacklistHost === 'dbl.spamhaus.org') {
+        // Spamhaus DBL: 127.0.1.255 is blocked, other 127.0.1.x are listed
+        if (ip.startsWith('127.0.1.') && ip !== '127.0.1.255') {
+          blacklisted = true;
+        }
+      } else if (blacklistHost === 'multi.uribl.com') {
+        // URIBL: 127.0.0.1 is blocked/refused, 127.0.0.2/4/8 are listed
+        if (ip.startsWith('127.0.0.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      } else if (blacklistHost === 'multi.surbl.org') {
+        // SURBL: 127.0.0.1 is blocked/refused, others in 127.0.0.x are listed
+        if (ip.startsWith('127.0.0.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      } else if (blacklistHost === 'rhsbl.sorbs.net') {
+        // SORBS RHSBL: 127.0.0.1 is query refused, >=127.0.0.2 is listed
+        if (ip.startsWith('127.0.0.')) {
+          const parts = ip.split('.');
+          const lastOctet = parseInt(parts[3], 10);
+          if (lastOctet >= 2) {
+            blacklisted = true;
+          }
+        }
+      } else if (blacklistHost.includes('spameatingmonkey.net')) {
+        // Spam Eating Monkey: 127.0.0.2 is listed, 127.0.0.1 is query refused/blocked
+        if (ip === '127.0.0.2') {
+          blacklisted = true;
+        }
+      } else {
+        if (ip.startsWith('127.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      }
+
+      return { host: blacklistHost, blacklisted, result: ip };
     }
     return { host: blacklistHost, blacklisted: false };
   } catch {
