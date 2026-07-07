@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiSearch, FiGlobe, FiCalendar, FiClock, FiFileText } from 'react-icons/fi';
+import { FiSearch, FiGlobe, FiCalendar, FiClock, FiFileText, FiUser, FiMail, FiMapPin } from 'react-icons/fi';
+import { BACKEND_URL } from '../config';
 
 // RDAP (Registration Data Access Protocol) — the modern WHOIS replacement
 // Uses structured JSON from rdap.org, which proxies to the authoritative RDAP server
@@ -13,6 +14,19 @@ async function rdapLookup(domain) {
   const registrarEntity = data.entities?.find(e => e.roles?.includes('registrar'));
   const registrar = registrarEntity?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || 'N/A';
 
+  // Extract registrant from RDAP (often redacted due to GDPR)
+  let registrantName = null;
+  const registrantEntity = data.entities?.find(e => e.roles?.includes('registrant'));
+  if (registrantEntity) {
+    registrantName = registrantEntity?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || null;
+  }
+  if (!registrantName && registrarEntity?.entities) {
+    const nestedRegistrant = registrarEntity.entities.find(e => e.roles?.includes('registrant'));
+    if (nestedRegistrant) {
+      registrantName = nestedRegistrant?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || null;
+    }
+  }
+
   // Extract events
   const getEvent = (action) => data.events?.find(e => e.eventAction === action)?.eventDate || null;
 
@@ -22,29 +36,107 @@ async function rdapLookup(domain) {
   // Extract status
   const status = data.status || [];
 
-  // Build raw text representation
-  const rawLines = [
-    `Domain Name: ${data.ldhName || domain}`,
-    `Registrar: ${registrar}`,
-    `Status: ${status.join(', ')}`,
-    `Registration Date: ${getEvent('registration') || 'N/A'}`,
-    `Expiration Date: ${getEvent('expiration') || 'N/A'}`,
-    `Last Updated: ${getEvent('last changed') || 'N/A'}`,
-    `Nameservers: ${nameservers.join(', ')}`,
-    `DNSSEC: ${data.secureDNS?.delegationSigned ? 'Signed' : 'Unsigned'}`,
-  ];
-
   return {
     success: true,
     domain: data.ldhName || domain,
     registrar,
+    registrantName,
     creationDate: getEvent('registration'),
     expirationDate: getEvent('expiration'),
     updatedDate: getEvent('last changed'),
     nameservers,
     status,
     dnssec: data.secureDNS?.delegationSigned ? 'Signed' : 'Unsigned',
-    raw: rawLines.join('\n'),
+  };
+}
+
+// Fetch raw WHOIS from backend (TCP port 43 — contains registrant info)
+async function backendWhoisLookup(domain) {
+  try {
+    const resp = await fetch(`${BACKEND_URL}/api/whois?domain=${encodeURIComponent(domain)}`);
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// Client-side parser fallback for older backends
+function parseWhoisRegistrant(rawWhois) {
+  if (!rawWhois || typeof rawWhois !== 'string') return {};
+  
+  const extract = (patterns) => {
+    for (const pattern of patterns) {
+      const match = rawWhois.match(pattern);
+      if (match && match[1] && match[1].trim() && !match[1].trim().toLowerCase().includes('redacted')) {
+        const val = match[1].trim();
+        // Skip privacy-protected values
+        if (val.toLowerCase().includes('privacy') || 
+            val.toLowerCase().includes('protected') ||
+            val.toLowerCase().includes('not disclosed') ||
+            val.toLowerCase().includes('data protected') ||
+            val.toLowerCase() === 'n/a') {
+          continue;
+        }
+        return val;
+      }
+    }
+    return null;
+  };
+
+  return {
+    registrantName: extract([
+      /Registrant Name:\s*(.+)/i,
+      /Registrant:\s*(.+)/i,
+      /owner:\s*(.+)/i,
+      /holder:\s*(.+)/i,
+      /Registrant Contact Name:\s*(.+)/i
+    ]),
+    registrantOrg: extract([
+      /Registrant Organization:\s*(.+)/i,
+      /Registrant Organisation:\s*(.+)/i,
+      /org-name:\s*(.+)/i,
+      /Organization:\s*(.+)/i,
+      /Registrant Contact Organisation:\s*(.+)/i
+    ]),
+    registrantEmail: extract([
+      /Registrant Email:\s*(.+)/i,
+      /Registrant Contact Email:\s*(.+)/i,
+      /e-mail:\s*(.+)/i
+    ]),
+    registrantCountry: extract([
+      /Registrant Country:\s*(.+)/i,
+      /Registrant Contact Country:\s*(.+)/i,
+      /country:\s*(.+)/i
+    ]),
+    registrantState: extract([
+      /Registrant State\/Province:\s*(.+)/i,
+      /Registrant State:\s*(.+)/i
+    ]),
+    registrar: extract([
+      /Registrar:\s*(.+)/i,
+      /Sponsoring Registrar:\s*(.+)/i,
+      /registrar:\s*(.+)/i
+    ]),
+    creationDate: extract([
+      /Creation Date:\s*(.+)/i,
+      /Registration Date:\s*(.+)/i,
+      /Created Date:\s*(.+)/i,
+      /created:\s*(.+)/i,
+      /Registration Time:\s*(.+)/i
+    ]),
+    expirationDate: extract([
+      /(?:Registry )?Expir(?:y|ation) Date:\s*(.+)/i,
+      /Expiration Date:\s*(.+)/i,
+      /paid-till:\s*(.+)/i,
+      /Expiry date:\s*(.+)/i
+    ]),
+    updatedDate: extract([
+      /Updated Date:\s*(.+)/i,
+      /Last Updated:\s*(.+)/i,
+      /last-modified:\s*(.+)/i,
+      /Last Modified:\s*(.+)/i
+    ])
   };
 }
 
@@ -64,9 +156,69 @@ export default function WhoisChecker() {
     setResult(null);
 
     try {
-      const data = await rdapLookup(domain.trim());
-      setResult(data);
-      toast.success('WHOIS / RDAP data retrieved successfully.');
+      // Run both lookups in parallel
+      const [rdapData, backendData] = await Promise.all([
+        rdapLookup(domain.trim()).catch(() => null),
+        backendWhoisLookup(domain.trim())
+      ]);
+
+      if (!rdapData && !backendData) {
+        throw new Error('Could not retrieve WHOIS data from any source.');
+      }
+
+      // Build combined result — prefer backend parsed for registrant info, fallback to client-side parsing of raw data if backend isn't updated
+      const parsed = (backendData?.parsed && Object.keys(backendData.parsed).length > 0)
+        ? backendData.parsed
+        : parseWhoisRegistrant(backendData?.data || backendData);
+      
+      // Use backend registrant if available, else RDAP, else N/A
+      const registrantName = parsed.registrantName || rdapData?.registrantName || 'N/A';
+      const registrantOrg = parsed.registrantOrg || null;
+      const registrantEmail = parsed.registrantEmail || null;
+      const registrantCountry = parsed.registrantCountry || null;
+      const registrantState = parsed.registrantState || null;
+
+      // For other fields: prefer RDAP (structured) with backend fallback
+      const registrar = rdapData?.registrar !== 'N/A' ? rdapData?.registrar : (parsed.registrar || 'N/A');
+      
+      // Build raw text with all available info
+      const rawLines = [
+        `Domain Name: ${rdapData?.domain || domain.trim()}`,
+        `Registrar: ${registrar}`,
+        `Registrant Name: ${registrantName}`,
+        registrantOrg ? `Registrant Organization: ${registrantOrg}` : null,
+        registrantEmail ? `Registrant Email: ${registrantEmail}` : null,
+        registrantCountry ? `Registrant Country: ${registrantCountry}` : null,
+        registrantState ? `Registrant State: ${registrantState}` : null,
+        `Status: ${(rdapData?.status || []).join(', ')}`,
+        `Registration Date: ${rdapData?.creationDate || parsed.creationDate || 'N/A'}`,
+        `Expiration Date: ${rdapData?.expirationDate || parsed.expirationDate || 'N/A'}`,
+        `Last Updated: ${rdapData?.updatedDate || parsed.updatedDate || 'N/A'}`,
+        `Nameservers: ${(rdapData?.nameservers || []).join(', ')}`,
+        `DNSSEC: ${rdapData?.dnssec || 'Unknown'}`,
+      ].filter(Boolean);
+
+      const combined = {
+        success: true,
+        domain: rdapData?.domain || domain.trim(),
+        registrar,
+        registrantName,
+        registrantOrg,
+        registrantEmail,
+        registrantCountry,
+        registrantState,
+        creationDate: rdapData?.creationDate || parsed.creationDate || null,
+        expirationDate: rdapData?.expirationDate || parsed.expirationDate || null,
+        updatedDate: rdapData?.updatedDate || parsed.updatedDate || null,
+        nameservers: rdapData?.nameservers || [],
+        status: rdapData?.status || [],
+        dnssec: rdapData?.dnssec || 'Unknown',
+        raw: rawLines.join('\n'),
+        rawWhois: backendData?.data || null,
+      };
+
+      setResult(combined);
+      toast.success('WHOIS data retrieved successfully.');
     } catch (err) {
       toast.error(err.message || 'Error retrieving WHOIS data.');
     } finally {
@@ -131,7 +283,7 @@ export default function WhoisChecker() {
               <div className="glass-panel p-6 space-y-4">
                 <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Record Intelligence</h3>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Registrar */}
                   <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-900 flex items-center gap-3">
                     <div className="p-2 bg-purple-500/10 rounded-lg border border-purple-500/20 text-purple-400 shrink-0">
@@ -143,7 +295,59 @@ export default function WhoisChecker() {
                     </div>
                   </div>
 
-                  {/* Registrant */}
+                  {/* Account Holder / Registrant Name */}
+                  <div className="bg-slate-950/40 p-4 rounded-xl border border-cyan-500/20 flex items-center gap-3">
+                    <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20 text-cyan-400 shrink-0">
+                      <FiUser className="text-lg" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[10px] text-slate-500 font-semibold uppercase">Account Holder</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={result.registrantName}>{result.registrantName}</span>
+                    </div>
+                  </div>
+
+                  {/* Registrant Organization */}
+                  {result.registrantOrg && (
+                    <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-900 flex items-center gap-3">
+                      <div className="p-2 bg-amber-500/10 rounded-lg border border-amber-500/20 text-amber-400 shrink-0">
+                        <FiFileText className="text-lg" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] text-slate-500 font-semibold uppercase">Organization</span>
+                        <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={result.registrantOrg}>{result.registrantOrg}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Registrant Email */}
+                  {result.registrantEmail && (
+                    <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-900 flex items-center gap-3">
+                      <div className="p-2 bg-pink-500/10 rounded-lg border border-pink-500/20 text-pink-400 shrink-0">
+                        <FiMail className="text-lg" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] text-slate-500 font-semibold uppercase">Registrant Email</span>
+                        <span className="text-xs font-bold text-slate-200 mt-0.5 truncate" title={result.registrantEmail}>{result.registrantEmail}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Registrant Location */}
+                  {(result.registrantCountry || result.registrantState) && (
+                    <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-900 flex items-center gap-3">
+                      <div className="p-2 bg-teal-500/10 rounded-lg border border-teal-500/20 text-teal-400 shrink-0">
+                        <FiMapPin className="text-lg" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] text-slate-500 font-semibold uppercase">Location</span>
+                        <span className="text-xs font-bold text-slate-200 mt-0.5 truncate">
+                          {[result.registrantState, result.registrantCountry].filter(Boolean).join(', ')}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status / DNSSEC */}
                   <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-900 flex items-center gap-3">
                     <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/20 text-blue-400 shrink-0">
                       <FiFileText className="text-lg" />
@@ -178,15 +382,15 @@ export default function WhoisChecker() {
                 </div>
               </div>
 
-              {/* Full Raw Console */}
+              {/* Full Raw WHOIS Console */}
               <div className="glass-panel p-6 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Raw WHOIS Record Content</h3>
+                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Raw WHOIS Record</h3>
                   <span className="text-[10px] bg-slate-950 border border-slate-800 rounded-md px-2 py-0.5 text-slate-500 font-bold uppercase">{domain.trim()}</span>
                 </div>
                 
-                <pre className="bg-slate-950/80 border border-slate-900/80 p-5 rounded-xl text-xs font-mono text-slate-300 leading-relaxed overflow-y-auto max-h-[400px] shadow-inner select-text">
-                  {result.raw}
+                <pre className="bg-slate-950/80 border border-slate-900/80 p-5 rounded-xl text-xs font-mono text-slate-300 leading-relaxed overflow-y-auto max-h-[400px] shadow-inner select-text whitespace-pre-wrap break-all">
+                  {result.rawWhois || result.raw}
                 </pre>
               </div>
             </div>

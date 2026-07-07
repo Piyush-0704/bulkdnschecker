@@ -18,7 +18,7 @@ import DashboardStats from './DashboardStats';
 // DNS record type number mapping
 const DNS_TYPE_NUMBERS = {
   A: 1, AAAA: 28, MX: 15, NS: 2, TXT: 16,
-  CNAME: 5, SOA: 6, SRV: 33, CAA: 257, DNSKEY: 48, DS: 43
+  CNAME: 5
 };
 
 // Query DNS-over-HTTPS (Google) for a single domain+type
@@ -118,7 +118,7 @@ export default function BulkDnsChecker() {
 
   const cancelRef = useRef(false);
 
-  const availableRecordTypes = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME', 'SOA', 'SRV', 'CAA', 'DNSKEY', 'DS'];
+  const availableRecordTypes = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME'];
 
   // Handle file import
   const handleFileUpload = (e) => {

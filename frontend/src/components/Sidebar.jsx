@@ -6,7 +6,6 @@ import {
   FiLock, 
   FiGlobe, 
   FiShield, 
-  FiCode, 
   FiMail, 
   FiBookOpen,
   FiTerminal
@@ -20,7 +19,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'ssl-check', name: 'SSL Certificate Checker', icon: FiLock, description: 'Verify TLS certificates' },
     { id: 'propagation', name: 'DNS Propagation', icon: FiGlobe, description: 'Global DNS check' },
     { id: 'email-security', name: 'Email Deliverability', icon: FiShield, description: 'SPF, DKIM, DMARC, DNSSEC' },
-    { id: 'header-analyzer', name: 'Header Analyzer', icon: FiCode, description: 'HTTP security headers' },
+    { id: 'dmarc-checker', name: 'DMARC Checker', icon: FiShield, description: 'Bulk DMARC record verification' },
     { id: 'smtp-blacklist', name: 'SMTP & Blacklist', icon: FiMail, description: 'Mail server check & DNSBL' },
     { id: 'api-docs', name: 'API Reference', icon: FiBookOpen, description: 'REST endpoints documentation' },
   ];

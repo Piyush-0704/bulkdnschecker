@@ -519,12 +519,92 @@ app.get('/api/reverse-dns', async (req, res) => {
   }
 });
 
+// Parse registrant info from raw WHOIS text
+function parseWhoisRegistrant(rawWhois) {
+  if (!rawWhois || typeof rawWhois !== 'string') return {};
+  
+  const extract = (patterns) => {
+    for (const pattern of patterns) {
+      const match = rawWhois.match(pattern);
+      if (match && match[1] && match[1].trim() && !match[1].trim().toLowerCase().includes('redacted')) {
+        const val = match[1].trim();
+        // Skip privacy-protected values
+        if (val.toLowerCase().includes('privacy') || 
+            val.toLowerCase().includes('protected') ||
+            val.toLowerCase().includes('not disclosed') ||
+            val.toLowerCase().includes('data protected') ||
+            val.toLowerCase() === 'n/a') {
+          continue;
+        }
+        return val;
+      }
+    }
+    return null;
+  };
+
+  return {
+    registrantName: extract([
+      /Registrant Name:\s*(.+)/i,
+      /Registrant:\s*(.+)/i,
+      /owner:\s*(.+)/i,
+      /holder:\s*(.+)/i,
+      /Registrant Contact Name:\s*(.+)/i
+    ]),
+    registrantOrg: extract([
+      /Registrant Organization:\s*(.+)/i,
+      /Registrant Organisation:\s*(.+)/i,
+      /org-name:\s*(.+)/i,
+      /Organization:\s*(.+)/i,
+      /Registrant Contact Organisation:\s*(.+)/i
+    ]),
+    registrantEmail: extract([
+      /Registrant Email:\s*(.+)/i,
+      /Registrant Contact Email:\s*(.+)/i,
+      /e-mail:\s*(.+)/i
+    ]),
+    registrantCountry: extract([
+      /Registrant Country:\s*(.+)/i,
+      /Registrant Contact Country:\s*(.+)/i,
+      /country:\s*(.+)/i
+    ]),
+    registrantState: extract([
+      /Registrant State\/Province:\s*(.+)/i,
+      /Registrant State:\s*(.+)/i
+    ]),
+    registrar: extract([
+      /Registrar:\s*(.+)/i,
+      /Sponsoring Registrar:\s*(.+)/i,
+      /registrar:\s*(.+)/i
+    ]),
+    creationDate: extract([
+      /Creation Date:\s*(.+)/i,
+      /Registration Date:\s*(.+)/i,
+      /Created Date:\s*(.+)/i,
+      /created:\s*(.+)/i,
+      /Registration Time:\s*(.+)/i
+    ]),
+    expirationDate: extract([
+      /(?:Registry )?Expir(?:y|ation) Date:\s*(.+)/i,
+      /Expiration Date:\s*(.+)/i,
+      /paid-till:\s*(.+)/i,
+      /Expiry date:\s*(.+)/i
+    ]),
+    updatedDate: extract([
+      /Updated Date:\s*(.+)/i,
+      /Last Updated:\s*(.+)/i,
+      /last-modified:\s*(.+)/i,
+      /Last Modified:\s*(.+)/i
+    ])
+  };
+}
+
 app.get('/api/whois', async (req, res) => {
   const { domain } = req.query;
   const clean = cleanDomain(domain);
   if (!clean) return res.status(400).json({ error: 'Invalid domain' });
   const data = await getWhoisData(clean);
-  res.json({ success: true, domain: clean, data });
+  const parsed = parseWhoisRegistrant(data);
+  res.json({ success: true, domain: clean, data, parsed });
 });
 
 app.get('/api/ssl-check', async (req, res) => {

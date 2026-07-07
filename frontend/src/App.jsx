@@ -7,7 +7,7 @@ import WhoisChecker from './components/WhoisChecker';
 import SslChecker from './components/SslChecker';
 import PropagationChecker from './components/PropagationChecker';
 import EmailSecurityChecker from './components/EmailSecurityChecker';
-import HeaderAnalyzer from './components/HeaderAnalyzer';
+import DmarcChecker from './components/DmarcChecker';
 import SmtpBlacklistChecker from './components/SmtpBlacklistChecker';
 import ApiDocs from './components/ApiDocs';
 import { wakeBackend } from './config';
@@ -33,8 +33,8 @@ export default function App() {
         return <PropagationChecker />;
       case 'email-security':
         return <EmailSecurityChecker />;
-      case 'header-analyzer':
-        return <HeaderAnalyzer />;
+      case 'dmarc-checker':
+        return <DmarcChecker />;
       case 'smtp-blacklist':
         return <SmtpBlacklistChecker />;
       case 'api-docs':
