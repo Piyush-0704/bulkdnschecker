@@ -469,8 +469,36 @@ async function checkIpBlacklist(ip) {
   const checks = lists.map(async (list) => {
     try {
       const lookupDomain = `${reversedIp}.${list.domain}`;
-      await dns.resolve4(lookupDomain);
-      return { list: list.name, blacklisted: true };
+      const ips = await dns.resolve4(lookupDomain);
+      if (!ips || ips.length === 0) {
+        return { list: list.name, blacklisted: false };
+      }
+      
+      const resultIp = ips[0];
+      let blacklisted = false;
+
+      // Filter out query block/refused codes (e.g. 127.255.255.254 or 127.0.0.1 for blocked)
+      if (list.domain.includes('spamhaus.org')) {
+        if ((resultIp.startsWith('127.0.0.') || resultIp.startsWith('127.0.1.')) && 
+            resultIp !== '127.255.255.252' && 
+            resultIp !== '127.255.255.254' && 
+            resultIp !== '127.255.255.255') {
+          blacklisted = true;
+        }
+      } else if (list.domain === 'bl.spamcop.net') {
+        if (resultIp === '127.0.0.2') {
+          blacklisted = true;
+        }
+      } else if (resultIp.startsWith('127.')) {
+        if (resultIp !== '127.255.255.252' && 
+            resultIp !== '127.255.255.254' && 
+            resultIp !== '127.255.255.255' && 
+            resultIp !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      }
+
+      return { list: list.name, blacklisted, result: resultIp };
     } catch (err) {
       return { list: list.name, blacklisted: false };
     }
