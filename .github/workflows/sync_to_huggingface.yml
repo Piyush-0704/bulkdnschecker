@@ -21,4 +21,11 @@ jobs:
           git config --global user.email "git@github.com"
           git config --global user.name "GitHub Actions"
           git remote add hf https://piyushqweh:$HF_TOKEN@huggingface.co/spaces/piyushqweh/bulkdns-api
-          git push --force hf main
+          git push --force hf main > hf_push.log 2>&1 || (cat hf_push.log && exit 1)
+
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-logs
+          path: hf_push.log
