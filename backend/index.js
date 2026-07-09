@@ -450,14 +450,33 @@ async function checkSmtpServer(domain) {
 }
 
 // 6. Blacklist checker
+const DNSBL_LISTS = [
+  'zen.spamhaus.org', 'bl.spamcop.net', 'dnsbl.sorbs.net', 'b.barracudacentral.org',
+  'dnsbl-1.uceprotect.net', 'dnsbl-2.uceprotect.net', 'dnsbl-3.uceprotect.net',
+  'all.s5h.net', 'blackholes.mail-abuse.org', 'bl.emailbasura.org',
+  'cbl.abuseat.org', 'combined.njabl.org', 'db.wpbl.info',
+  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch',
+  'dul.dnsbl.sorbs.net', 'http.dnsbl.sorbs.net', 'ips.backscatterer.org',
+  'ix.dnsbl.manitu.net', 'korea.services.net', 'misc.dnsbl.sorbs.net',
+  'no-more-funn.moensted.dk', 'pbl.spamhaus.org', 'proxy.bl.gweep.ca',
+  'psbl.surriel.com', 'relays.bl.gweep.ca', 'relays.bl.kundenserver.de',
+  'sbl-xbl.spamhaus.org', 'sbl.spamhaus.org', 'smtp.dnsbl.sorbs.net',
+  'socks.dnsbl.sorbs.net', 'spam.abuse.ch', 'spam.dnsbl.anonmails.de',
+  'spam.dnsbl.sorbs.net', 'spam.spamrats.com', 'spambot.bls.digibase.ca',
+  'spamrbl.imp.ch', 'tor.dan.me.uk', 'ubl.lashback.com',
+  'ubl.unsubscore.com', 'virbl.bit.nl', 'web.dnsbl.sorbs.net',
+  'wormrbl.imp.ch', 'xbl.spamhaus.org', 'zombie.dnsbl.sorbs.net'
+];
+
+const majorFriendlyNames = {
+  'zen.spamhaus.org': 'Spamhaus ZEN',
+  'spam.dnsbl.sorbs.net': 'SORBS Spam',
+  'bl.spamcop.net': 'Spamcop',
+  'b.barracudacentral.org': 'Barracuda BRBL'
+};
+
 async function checkIpBlacklist(ip) {
   const startTime = Date.now();
-  const lists = [
-    { name: 'Spamhaus ZEN', domain: 'zen.spamhaus.org' },
-    { name: 'SORBS Spam', domain: 'spam.dnsbl.sorbs.net' },
-    { name: 'Spamcop', domain: 'bl.spamcop.net' },
-    { name: 'Barracuda BRBL', domain: 'b.barracudacentral.org' }
-  ];
 
   // IP must be reversed: e.g. 1.2.3.4 -> 4.3.2.1
   const parts = ip.split('.');
@@ -466,26 +485,26 @@ async function checkIpBlacklist(ip) {
   }
   const reversedIp = parts.reverse().join('.');
 
-  const checks = lists.map(async (list) => {
+  const checks = DNSBL_LISTS.map(async (dnsbl) => {
     try {
-      const lookupDomain = `${reversedIp}.${list.domain}`;
+      const lookupDomain = `${reversedIp}.${dnsbl}`;
       const ips = await dns.resolve4(lookupDomain);
       if (!ips || ips.length === 0) {
-        return { list: list.name, blacklisted: false };
+        return { list: majorFriendlyNames[dnsbl] || dnsbl, dnsbl, blacklisted: false };
       }
       
       const resultIp = ips[0];
       let blacklisted = false;
 
       // Filter out query block/refused codes (e.g. 127.255.255.254 or 127.0.0.1 for blocked)
-      if (list.domain.includes('spamhaus.org')) {
+      if (dnsbl.includes('spamhaus.org')) {
         if ((resultIp.startsWith('127.0.0.') || resultIp.startsWith('127.0.1.')) && 
             resultIp !== '127.255.255.252' && 
             resultIp !== '127.255.255.254' && 
             resultIp !== '127.255.255.255') {
           blacklisted = true;
         }
-      } else if (list.domain === 'bl.spamcop.net') {
+      } else if (dnsbl === 'bl.spamcop.net') {
         if (resultIp === '127.0.0.2') {
           blacklisted = true;
         }
@@ -498,9 +517,9 @@ async function checkIpBlacklist(ip) {
         }
       }
 
-      return { list: list.name, blacklisted, result: resultIp };
+      return { list: majorFriendlyNames[dnsbl] || dnsbl, dnsbl, blacklisted, result: resultIp };
     } catch (err) {
-      return { list: list.name, blacklisted: false };
+      return { list: majorFriendlyNames[dnsbl] || dnsbl, dnsbl, blacklisted: false };
     }
   });
 
@@ -508,6 +527,73 @@ async function checkIpBlacklist(ip) {
   return {
     success: true,
     ip,
+    results,
+    timeMs: Date.now() - startTime
+  };
+}
+
+// 6.2. Domain Blacklist checker
+async function checkDomainBlacklists(domain) {
+  const startTime = Date.now();
+  const lists = [
+    { name: 'Spamhaus DBL', host: 'dbl.spamhaus.org', description: 'Spamhaus Domain Block List' },
+    { name: 'SURBL Multi', host: 'multi.surbl.org', description: 'SURBL Multi List' },
+    { name: 'URIBL Multi', host: 'multi.uribl.com', description: 'URIBL Multi List' },
+    { name: 'SORBS RHSBL', host: 'rhsbl.sorbs.net', description: 'SORBS RHSBL' },
+    { name: 'Spam Eating Monkey URIBL', host: 'uribl.spameatingmonkey.net', description: 'Spam Eating Monkey URIBL' },
+    { name: 'Spam Eating Monkey Fresh', host: 'fresh.spameatingmonkey.net', description: 'Freshly registered domains (<15 days)' }
+  ];
+
+  const checks = lists.map(async (list) => {
+    try {
+      const lookupDomain = `${domain}.${list.host}`;
+      const ips = await dns.resolve4(lookupDomain);
+      if (!ips || ips.length === 0) {
+        return { host: list.host, blacklisted: false };
+      }
+      const ip = ips[0];
+      let blacklisted = false;
+
+      if (list.host === 'dbl.spamhaus.org') {
+        if (ip.startsWith('127.0.1.') && ip !== '127.0.1.255') {
+          blacklisted = true;
+        }
+      } else if (list.host === 'multi.uribl.com') {
+        if (ip.startsWith('127.0.0.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      } else if (list.host === 'multi.surbl.org') {
+        if (ip.startsWith('127.0.0.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      } else if (list.host === 'rhsbl.sorbs.net') {
+        if (ip.startsWith('127.0.0.')) {
+          const parts = ip.split('.');
+          const lastOctet = parseInt(parts[3], 10);
+          if (lastOctet >= 2) {
+            blacklisted = true;
+          }
+        }
+      } else if (list.host.includes('spameatingmonkey.net')) {
+        if (ip === '127.0.0.2') {
+          blacklisted = true;
+        }
+      } else {
+        if (ip.startsWith('127.') && ip !== '127.0.0.1') {
+          blacklisted = true;
+        }
+      }
+
+      return { host: list.host, blacklisted, result: ip };
+    } catch (err) {
+      return { host: list.host, blacklisted: false };
+    }
+  });
+
+  const results = await Promise.all(checks);
+  return {
+    success: true,
+    domain,
     results,
     timeMs: Date.now() - startTime
   };
@@ -789,6 +875,14 @@ app.get('/api/blacklist-check', async (req, res) => {
   const { ip } = req.query;
   if (!ip) return res.status(400).json({ error: 'IP address required' });
   const data = await checkIpBlacklist(ip);
+  res.json(data);
+});
+
+app.get('/api/domain-blacklist-check', async (req, res) => {
+  const { domain } = req.query;
+  const clean = cleanDomain(domain);
+  if (!clean) return res.status(400).json({ error: 'Invalid domain' });
+  const data = await checkDomainBlacklists(clean);
   res.json(data);
 });
 

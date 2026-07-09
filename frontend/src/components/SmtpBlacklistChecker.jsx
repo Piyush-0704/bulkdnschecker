@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiSearch, FiMail, FiActivity, FiCheckCircle, FiXCircle, FiRefreshCw, FiAlertTriangle, FiList, FiGlobe } from 'react-icons/fi';
+import { BACKEND_URL } from '../config';
 
 // 50+ DNSBL blacklists to check via DoH
 const DNSBL_LISTS = [
@@ -192,19 +193,24 @@ export default function SmtpBlacklistChecker() {
     setBlacklistResult(null);
 
     try {
-      const results = await Promise.all(DNSBL_LISTS.map(bl => checkDnsbl(ipAddress.trim(), bl)));
-      const blacklistedCount = results.filter(r => r.blacklisted).length;
-      setBlacklistResult({
-        success: true,
-        ip: ipAddress.trim(),
-        results,
-        blacklistedCount,
-        totalChecked: results.length
-      });
-      if (blacklistedCount > 0) {
-        toast.error(`IP is blacklisted on ${blacklistedCount} list(s).`);
+      const resp = await fetch(`${BACKEND_URL}/api/blacklist-check?ip=${encodeURIComponent(ipAddress.trim())}`);
+      const data = await resp.json();
+      if (data.success) {
+        const blacklistedCount = data.results.filter(r => r.blacklisted).length;
+        setBlacklistResult({
+          success: true,
+          ip: ipAddress.trim(),
+          results: data.results,
+          blacklistedCount,
+          totalChecked: data.results.length
+        });
+        if (blacklistedCount > 0) {
+          toast.error(`IP is blacklisted on ${blacklistedCount} list(s).`);
+        } else {
+          toast.success('IP is clean on all checked blacklists!');
+        }
       } else {
-        toast.success('IP is clean on all checked blacklists!');
+        throw new Error(data.error || 'Backend blacklist check failed');
       }
     } catch (err) {
       toast.error(err.message || 'Error conducting blacklist lookups.');
@@ -228,19 +234,24 @@ export default function SmtpBlacklistChecker() {
     clean = clean.split('/')[0].split(':')[0];
 
     try {
-      const results = await Promise.all(DOMAIN_BLACKLISTS.map(bl => checkDomainBlacklist(clean, bl.host)));
-      const blacklistedCount = results.filter(r => r.blacklisted).length;
-      setDomainBlacklistResult({
-        success: true,
-        domain: clean,
-        results,
-        blacklistedCount,
-        totalChecked: results.length
-      });
-      if (blacklistedCount > 0) {
-        toast.error(`Domain is blacklisted on ${blacklistedCount} list(s).`);
+      const resp = await fetch(`${BACKEND_URL}/api/domain-blacklist-check?domain=${encodeURIComponent(clean)}`);
+      const data = await resp.json();
+      if (data.success) {
+        const blacklistedCount = data.results.filter(r => r.blacklisted).length;
+        setDomainBlacklistResult({
+          success: true,
+          domain: clean,
+          results: data.results,
+          blacklistedCount,
+          totalChecked: data.results.length
+        });
+        if (blacklistedCount > 0) {
+          toast.error(`Domain is blacklisted on ${blacklistedCount} list(s).`);
+        } else {
+          toast.success('Domain is clean on all checked blacklists!');
+        }
       } else {
-        toast.success('Domain is clean on all checked blacklists!');
+        throw new Error(data.error || 'Backend domain blacklist check failed');
       }
     } catch (err) {
       toast.error(err.message || 'Error conducting domain blacklist lookups.');
