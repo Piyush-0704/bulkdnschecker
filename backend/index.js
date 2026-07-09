@@ -4,6 +4,8 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const dns = require('dns').promises;
 const { Resolver } = require('dns').promises;
+const blacklistResolver = new Resolver();
+blacklistResolver.setServers(['208.67.222.222', '8.8.8.8', '1.1.1.1']);
 const tls = require('tls');
 const net = require('net');
 const https = require('https');
@@ -488,7 +490,7 @@ async function checkIpBlacklist(ip) {
   const checks = DNSBL_LISTS.map(async (dnsbl) => {
     try {
       const lookupDomain = `${reversedIp}.${dnsbl}`;
-      const ips = await dns.resolve4(lookupDomain);
+      const ips = await blacklistResolver.resolve4(lookupDomain);
       if (!ips || ips.length === 0) {
         return { list: majorFriendlyNames[dnsbl] || dnsbl, dnsbl, blacklisted: false };
       }
@@ -547,7 +549,7 @@ async function checkDomainBlacklists(domain) {
   const checks = lists.map(async (list) => {
     try {
       const lookupDomain = `${domain}.${list.host}`;
-      const ips = await dns.resolve4(lookupDomain);
+      const ips = await blacklistResolver.resolve4(lookupDomain);
       if (!ips || ips.length === 0) {
         return { host: list.host, blacklisted: false };
       }
