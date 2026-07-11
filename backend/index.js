@@ -271,6 +271,60 @@ function findReferralServer(rawText) {
   return null;
 }
 
+function fetchJsonWithRedirect(url, limit = 5) {
+  return new Promise((resolve, reject) => {
+    if (limit <= 0) {
+      reject(new Error('Too many redirects'));
+      return;
+    }
+    
+    https.get(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        resolve(fetchJsonWithRedirect(res.headers.location, limit - 1));
+        return;
+      }
+      
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP status ${res.statusCode}`));
+        return;
+      }
+      
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+async function fetchRdapPort43(domain) {
+  try {
+    const data = await fetchJsonWithRedirect(`https://rdap.org/domain/${encodeURIComponent(domain)}`);
+    
+    // Check root port43
+    if (data.port43 && data.port43 !== 'whois.iana.org') {
+      return data.port43;
+    }
+    
+    // Check related link redirects
+    const relatedLink = data.links?.find(l => l.rel === 'related' && l.href);
+    if (relatedLink && relatedLink.href) {
+      const subData = await fetchJsonWithRedirect(relatedLink.href);
+      if (subData.port43 && subData.port43 !== 'whois.iana.org') {
+        return subData.port43;
+      }
+    }
+  } catch (err) {
+    console.error("RDAP port43 fetch failed:", err.message);
+  }
+  return null;
+}
+
 async function getWhoisData(domain) {
   let currentHost = 'whois.iana.org';
   const visited = new Set();
@@ -287,7 +341,7 @@ async function getWhoisData(domain) {
     
     try {
       const data = await whoisQuery(domain, currentHost);
-      if (data && !data.includes('Error retrieving WHOIS data')) {
+      if (data && !data.includes('Error retrieving WHOIS data') && !data.includes('TLD is not supported')) {
         rawData = data;
       }
       
@@ -300,6 +354,22 @@ async function getWhoisData(domain) {
     } catch (err) {
       console.error(`WHOIS lookup error for ${domain} on ${currentHost}:`, err);
       break;
+    }
+  }
+
+  // Fallback: If we didn't find detailed registrar details (e.g. for .info / .online TLDs with deprecated port 43 registry WHOIS),
+  // fetch registrar WHOIS server via RDAP and query it!
+  if (!rawData || (!rawData.includes('Registrant Name') && !rawData.includes('Registrant Organization') && !rawData.includes('Registrar WHOIS Server'))) {
+    const port43Server = await fetchRdapPort43(domain);
+    if (port43Server && port43Server !== 'whois.iana.org') {
+      try {
+        const data = await whoisQuery(domain, port43Server);
+        if (data && !data.includes('Error retrieving WHOIS data') && !data.includes('TLD is not supported')) {
+          rawData = data;
+        }
+      } catch (err) {
+        console.error(`WHOIS fallback lookup error for ${domain} on ${port43Server}:`, err);
+      }
     }
   }
 

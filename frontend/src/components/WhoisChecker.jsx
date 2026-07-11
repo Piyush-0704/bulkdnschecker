@@ -36,28 +36,71 @@ async function rdapLookup(domain) {
     return null;
   };
 
+  let registrantOrg = null;
   const registrantEntity = data.entities?.find(e => e.roles?.includes('registrant'));
   registrantName = extractNameFromEntity(registrantEntity);
+  if (registrantEntity) {
+    const vcards = registrantEntity.vcardArray?.[1] || [];
+    const orgVal = vcards.find(v => v[0] === 'org')?.[3];
+    if (orgVal && !isRedacted(orgVal)) {
+      registrantOrg = orgVal;
+    }
+  }
 
   if (!registrantName && registrarEntity?.entities) {
     const nestedRegistrant = registrarEntity.entities.find(e => e.roles?.includes('registrant'));
     registrantName = extractNameFromEntity(nestedRegistrant);
+    if (nestedRegistrant) {
+      const vcards = nestedRegistrant.vcardArray?.[1] || [];
+      const orgVal = vcards.find(v => v[0] === 'org')?.[3];
+      if (orgVal && !isRedacted(orgVal)) {
+        registrantOrg = orgVal;
+      }
+    }
   }
 
   // Fallback: Query registrar's authoritative RDAP server directly if link is provided (bypasses registry redactions)
-  if (!registrantName && registrarEntity) {
-    const rdapLink = registrarEntity.links?.find(l => 
-      (l.value && l.value.startsWith('https://rdap.')) || 
-      (l.href && l.href.startsWith('https://rdap.'))
-    );
-    const baseUrl = rdapLink ? (rdapLink.value || rdapLink.href) : null;
-    if (baseUrl) {
+  if (!registrantName) {
+    let registrarRdapUrl = null;
+    
+    // 1. Prioritize root links for "related" which maps directly to registrar RDAP endpoint
+    const relatedLink = data.links?.find(l => l.rel === 'related' && l.href);
+    if (relatedLink && relatedLink.href) {
+      registrarRdapUrl = relatedLink.href;
+    }
+    
+    // 2. Fall back to parsing the registrar entity links
+    if (!registrarRdapUrl && registrarEntity) {
+      const rdapLink = registrarEntity.links?.find(l => 
+        l.href && 
+        l.href.includes('rdap.') && 
+        !l.href.includes('identitydigital.services') && 
+        !l.href.includes('donuts.')
+      );
+      const baseUrl = rdapLink ? rdapLink.href : null;
+      if (baseUrl) {
+        let base = baseUrl;
+        if (!base.endsWith('/')) base += '/';
+        registrarRdapUrl = `${base}domain/${encodeURIComponent(domain.trim().toLowerCase())}`;
+      }
+    }
+    
+    if (registrarRdapUrl) {
       try {
-        const subResp = await fetch(`${baseUrl}domain/${encodeURIComponent(domain.trim().toLowerCase())}`);
+        const subResp = await fetch(registrarRdapUrl);
         if (subResp.ok) {
           const subData = await subResp.json();
           const subRegistrant = subData.entities?.find(e => e.roles?.includes('registrant'));
-          registrantName = extractNameFromEntity(subRegistrant);
+          const extracted = extractNameFromEntity(subRegistrant);
+          if (extracted) registrantName = extracted;
+          
+          if (subRegistrant) {
+            const vcards = subRegistrant.vcardArray?.[1] || [];
+            const orgVal = vcards.find(v => v[0] === 'org')?.[3];
+            if (orgVal && !isRedacted(orgVal)) {
+              registrantOrg = orgVal;
+            }
+          }
         }
       } catch {}
     }
@@ -77,6 +120,7 @@ async function rdapLookup(domain) {
     domain: data.ldhName || domain,
     registrar,
     registrantName,
+    registrantOrg,
     creationDate: getEvent('registration'),
     expirationDate: getEvent('expiration'),
     updatedDate: getEvent('last changed'),
