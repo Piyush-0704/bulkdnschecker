@@ -99,16 +99,6 @@ export default function ApiDocs() {
       ]
     },
     {
-      id: 'smtp-check',
-      method: 'GET',
-      path: '/api/smtp-check',
-      description: 'Connect to standard port 25 MX exchange to confirm mail headers.',
-      queryParams: true,
-      params: [
-        { name: 'domain', type: 'string', required: true, description: 'Target domain.' }
-      ]
-    },
-    {
       id: 'blacklist-check',
       method: 'GET',
       path: '/api/blacklist-check',

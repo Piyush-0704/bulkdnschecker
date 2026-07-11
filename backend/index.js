@@ -244,24 +244,66 @@ function whoisQuery(domain, host = 'whois.iana.org') {
   });
 }
 
-async function getWhoisData(domain) {
-  try {
-    const rawIana = await whoisQuery(domain, 'whois.iana.org');
-    // Look for referrals
-    const referMatch = rawIana.match(/refer:\s+([a-zA-Z0-9.-]+)/i);
-    const whoisMatch = rawIana.match(/whois:\s+([a-zA-Z0-9.-]+)/i);
-    const secondaryHost = (referMatch && referMatch[1]) || (whoisMatch && whoisMatch[1]);
-    
-    if (secondaryHost && secondaryHost.trim() !== 'whois.iana.org') {
-      const detailedData = await whoisQuery(domain, secondaryHost.trim());
-      return detailedData;
+function findReferralServer(rawText) {
+  if (!rawText) return null;
+  const lines = rawText.split('\n');
+  
+  for (const line of lines) {
+    const regMatch = line.match(/(?:Registrar WHOIS Server|whois server|Referral URL):\s*(?:whois:\/\/)?([a-zA-Z0-9.-]+)/i);
+    if (regMatch && regMatch[1]) {
+      const server = regMatch[1].trim().toLowerCase();
+      if (server && server !== 'whois.iana.org' && !server.startsWith('http://') && !server.startsWith('https://')) {
+        return server;
+      }
     }
-    return rawIana;
-  } catch (err) {
-    console.error("WHOIS query error:", err);
-    const msg = err ? (err.message || err.code || String(err)) : 'Unknown error';
-    return `Error retrieving WHOIS data: ${msg}`;
   }
+
+  for (const line of lines) {
+    const match = line.match(/^\s*(?:refer|whois):\s*([a-zA-Z0-9.-]+)/i);
+    if (match && match[1]) {
+      const server = match[1].trim().toLowerCase();
+      if (server && server !== 'whois.iana.org') {
+        return server;
+      }
+    }
+  }
+  
+  return null;
+}
+
+async function getWhoisData(domain) {
+  let currentHost = 'whois.iana.org';
+  const visited = new Set();
+  let rawData = '';
+  let depth = 0;
+
+  while (currentHost && depth < 5) {
+    currentHost = currentHost.trim().toLowerCase();
+    if (visited.has(currentHost)) {
+      break;
+    }
+    visited.add(currentHost);
+    depth++;
+    
+    try {
+      const data = await whoisQuery(domain, currentHost);
+      if (data && !data.includes('Error retrieving WHOIS data')) {
+        rawData = data;
+      }
+      
+      const nextHost = findReferralServer(data);
+      if (nextHost && nextHost !== currentHost) {
+        currentHost = nextHost;
+      } else {
+        break;
+      }
+    } catch (err) {
+      console.error(`WHOIS lookup error for ${domain} on ${currentHost}:`, err);
+      break;
+    }
+  }
+
+  return rawData || `Error retrieving WHOIS data for ${domain}`;
 }
 
 // 3. SSL certificate check
@@ -386,70 +428,6 @@ function analyzeHeaders(domain) {
   });
 }
 
-// 5. SMTP Connection checker
-async function checkSmtpServer(domain) {
-  const startTime = Date.now();
-  try {
-    const mxRecords = await dns.resolveMx(domain);
-    if (!mxRecords || mxRecords.length === 0) {
-      return { success: false, error: 'No MX records found', timeMs: Date.now() - startTime };
-    }
-    
-    // Sort MX records by priority (lower is higher priority)
-    mxRecords.sort((a, b) => a.priority - b.priority);
-    const mxHost = mxRecords[0].exchange;
-
-    return new Promise((resolve) => {
-      const socket = net.createConnection(25, mxHost);
-      let response = '';
-      let connected = false;
-
-      socket.setTimeout(5000);
-      socket.setEncoding('utf8');
-
-      socket.on('connect', () => {
-        connected = true;
-      });
-
-      socket.on('data', (chunk) => {
-        response += chunk;
-        if (response.includes('220')) {
-          socket.write('QUIT\r\n');
-        }
-      });
-
-      socket.on('end', () => {
-        resolve({
-          success: true,
-          mxHost,
-          smtpBanner: response.trim().split('\n')[0],
-          timeMs: Date.now() - startTime
-        });
-      });
-
-      socket.on('error', (err) => {
-        resolve({
-          success: false,
-          mxHost,
-          error: `SMTP check failed: ${err.message}`,
-          timeMs: Date.now() - startTime
-        });
-      });
-
-      socket.on('timeout', () => {
-        socket.destroy();
-        resolve({
-          success: false,
-          mxHost,
-          error: 'SMTP connection timeout',
-          timeMs: Date.now() - startTime
-        });
-      });
-    });
-  } catch (err) {
-    return { success: false, error: `MX lookup failed: ${err.message}`, timeMs: Date.now() - startTime };
-  }
-}
 
 // 6. Blacklist checker
 const DNSBL_LISTS = [
@@ -660,21 +638,25 @@ function parseWhoisRegistrant(rawWhois) {
     return null;
   };
 
+  const name = extract([
+    /Registrant Name:\s*(.+)/i,
+    /Registrant:\s*(.+)/i,
+    /owner:\s*(.+)/i,
+    /holder:\s*(.+)/i,
+    /Registrant Contact Name:\s*(.+)/i
+  ]);
+
+  const org = extract([
+    /Registrant Organization:\s*(.+)/i,
+    /Registrant Organisation:\s*(.+)/i,
+    /org-name:\s*(.+)/i,
+    /Organization:\s*(.+)/i,
+    /Registrant Contact Organisation:\s*(.+)/i
+  ]);
+
   return {
-    registrantName: extract([
-      /Registrant Name:\s*(.+)/i,
-      /Registrant:\s*(.+)/i,
-      /owner:\s*(.+)/i,
-      /holder:\s*(.+)/i,
-      /Registrant Contact Name:\s*(.+)/i
-    ]),
-    registrantOrg: extract([
-      /Registrant Organization:\s*(.+)/i,
-      /Registrant Organisation:\s*(.+)/i,
-      /org-name:\s*(.+)/i,
-      /Organization:\s*(.+)/i,
-      /Registrant Contact Organisation:\s*(.+)/i
-    ]),
+    registrantName: name || org,
+    registrantOrg: org,
     registrantEmail: extract([
       /Registrant Email:\s*(.+)/i,
       /Registrant Contact Email:\s*(.+)/i,
@@ -865,13 +847,6 @@ app.get('/api/header-analyzer', async (req, res) => {
   res.json(data);
 });
 
-app.get('/api/smtp-check', async (req, res) => {
-  const { domain } = req.query;
-  const clean = cleanDomain(domain);
-  if (!clean) return res.status(400).json({ error: 'Invalid domain' });
-  const data = await checkSmtpServer(clean);
-  res.json(data);
-});
 
 app.get('/api/blacklist-check', async (req, res) => {
   const { ip } = req.query;

@@ -120,21 +120,25 @@ function parseWhoisRegistrant(rawWhois) {
     return null;
   };
 
+  const name = extract([
+    /Registrant Name:\s*(.+)/i,
+    /Registrant:\s*(.+)/i,
+    /owner:\s*(.+)/i,
+    /holder:\s*(.+)/i,
+    /Registrant Contact Name:\s*(.+)/i
+  ]);
+
+  const org = extract([
+    /Registrant Organization:\s*(.+)/i,
+    /Registrant Organisation:\s*(.+)/i,
+    /org-name:\s*(.+)/i,
+    /Organization:\s*(.+)/i,
+    /Registrant Contact Organisation:\s*(.+)/i
+  ]);
+
   return {
-    registrantName: extract([
-      /Registrant Name:\s*(.+)/i,
-      /Registrant:\s*(.+)/i,
-      /owner:\s*(.+)/i,
-      /holder:\s*(.+)/i,
-      /Registrant Contact Name:\s*(.+)/i
-    ]),
-    registrantOrg: extract([
-      /Registrant Organization:\s*(.+)/i,
-      /Registrant Organisation:\s*(.+)/i,
-      /org-name:\s*(.+)/i,
-      /Organization:\s*(.+)/i,
-      /Registrant Contact Organisation:\s*(.+)/i
-    ]),
+    registrantName: name || org,
+    registrantOrg: org,
     registrantEmail: extract([
       /Registrant Email:\s*(.+)/i,
       /Registrant Contact Email:\s*(.+)/i,
@@ -207,9 +211,9 @@ export default function WhoisChecker() {
         ? backendData.parsed
         : parseWhoisRegistrant(backendData?.data || backendData);
       
-      // Use backend registrant if available, else RDAP, else N/A
-      const registrantName = parsed.registrantName || rdapData?.registrantName || 'N/A';
-      const registrantOrg = parsed.registrantOrg || null;
+      // Use backend registrant if available, else RDAP, else fallback to organization if name not found/redacted, else N/A
+      const registrantOrg = parsed.registrantOrg || rdapData?.registrantOrg || null;
+      const registrantName = parsed.registrantName || rdapData?.registrantName || registrantOrg || 'N/A';
       const registrantEmail = parsed.registrantEmail || null;
       const registrantCountry = parsed.registrantCountry || null;
       const registrantState = parsed.registrantState || null;
