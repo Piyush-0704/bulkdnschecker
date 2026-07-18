@@ -9,7 +9,7 @@ const DNSBL_LISTS = [
   'dnsbl-1.uceprotect.net', 'dnsbl-2.uceprotect.net', 'dnsbl-3.uceprotect.net',
   'all.s5h.net', 'blackholes.mail-abuse.org', 'bl.emailbasura.org',
   'cbl.abuseat.org', 'combined.njabl.org', 'db.wpbl.info',
-  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch',
+  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch', 'dyna.spamrats.com',
   'dul.dnsbl.sorbs.net', 'http.dnsbl.sorbs.net', 'ips.backscatterer.org',
   'ix.dnsbl.manitu.net', 'korea.services.net', 'misc.dnsbl.sorbs.net',
   'no-more-funn.moensted.dk', 'pbl.spamhaus.org', 'proxy.bl.gweep.ca',
@@ -302,7 +302,12 @@ export default function SmtpBlacklistChecker() {
                   <div className="space-y-3">
                     {blacklistResult.results.map((r, i) => (
                       <div key={i} className="flex items-center justify-between bg-slate-950/40 border border-slate-900 p-4 rounded-xl shadow-inner">
-                        <span className="text-xs font-bold text-slate-200">{r.dnsbl}</span>
+                        <div>
+                          <span className="text-xs font-bold text-slate-200 block">{r.list || r.dnsbl}</span>
+                          {r.list && r.list !== r.dnsbl && (
+                            <span className="text-[10px] text-slate-500 font-medium">{r.dnsbl}</span>
+                          )}
+                        </div>
                         {r.blacklisted ? (
                           <span className="status-badge bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">
                             <FiAlertTriangle className="text-xs shrink-0" />

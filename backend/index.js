@@ -505,7 +505,7 @@ const DNSBL_LISTS = [
   'dnsbl-1.uceprotect.net', 'dnsbl-2.uceprotect.net', 'dnsbl-3.uceprotect.net',
   'all.s5h.net', 'blackholes.mail-abuse.org', 'bl.emailbasura.org',
   'cbl.abuseat.org', 'combined.njabl.org', 'db.wpbl.info',
-  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch',
+  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch', 'dyna.spamrats.com',
   'dul.dnsbl.sorbs.net', 'http.dnsbl.sorbs.net', 'ips.backscatterer.org',
   'ix.dnsbl.manitu.net', 'korea.services.net', 'misc.dnsbl.sorbs.net',
   'no-more-funn.moensted.dk', 'pbl.spamhaus.org', 'proxy.bl.gweep.ca',
@@ -522,7 +522,12 @@ const majorFriendlyNames = {
   'zen.spamhaus.org': 'Spamhaus ZEN',
   'spam.dnsbl.sorbs.net': 'SORBS Spam',
   'bl.spamcop.net': 'Spamcop',
-  'b.barracudacentral.org': 'Barracuda BRBL'
+  'b.barracudacentral.org': 'Barracuda BRBL',
+  'spam.spamrats.com': 'RATS Spam',
+  'dyna.spamrats.com': 'RATS Dyna',
+  'dnsbl-1.uceprotect.net': 'UCEPROTECTL1',
+  'dnsbl-2.uceprotect.net': 'UCEPROTECTL2',
+  'dnsbl-3.uceprotect.net': 'UCEPROTECTL3'
 };
 
 async function checkIpBlacklist(ip) {
