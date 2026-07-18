@@ -501,18 +501,20 @@ function analyzeHeaders(domain) {
 
 // 6. Blacklist checker
 const DNSBL_LISTS = [
-  'zen.spamhaus.org', 'bl.spamcop.net', 'dnsbl.sorbs.net', 'b.barracudacentral.org',
-  'dnsbl-1.uceprotect.net', 'dnsbl-2.uceprotect.net', 'dnsbl-3.uceprotect.net',
+  'zen.spamhaus.org', 'bl.spamcop.net',
+  'spam.spamrats.com', 'dyna.spamrats.com', 'dnsbl-2.uceprotect.net', 'dnsbl-3.uceprotect.net',
+  'dnsbl.sorbs.net', 'b.barracudacentral.org',
+  'dnsbl-1.uceprotect.net',
   'all.s5h.net', 'blackholes.mail-abuse.org', 'bl.emailbasura.org',
   'cbl.abuseat.org', 'combined.njabl.org', 'db.wpbl.info',
-  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch', 'dyna.spamrats.com',
+  'dnsbl.cyberlogic.net', 'dnsbl.inps.de', 'drone.abuse.ch',
   'dul.dnsbl.sorbs.net', 'http.dnsbl.sorbs.net', 'ips.backscatterer.org',
   'ix.dnsbl.manitu.net', 'korea.services.net', 'misc.dnsbl.sorbs.net',
   'no-more-funn.moensted.dk', 'pbl.spamhaus.org', 'proxy.bl.gweep.ca',
   'psbl.surriel.com', 'relays.bl.gweep.ca', 'relays.bl.kundenserver.de',
   'sbl-xbl.spamhaus.org', 'sbl.spamhaus.org', 'smtp.dnsbl.sorbs.net',
   'socks.dnsbl.sorbs.net', 'spam.abuse.ch', 'spam.dnsbl.anonmails.de',
-  'spam.dnsbl.sorbs.net', 'spam.spamrats.com', 'spambot.bls.digibase.ca',
+  'spam.dnsbl.sorbs.net', 'spambot.bls.digibase.ca',
   'spamrbl.imp.ch', 'tor.dan.me.uk', 'ubl.lashback.com',
   'ubl.unsubscore.com', 'virbl.bit.nl', 'web.dnsbl.sorbs.net',
   'wormrbl.imp.ch', 'xbl.spamhaus.org', 'zombie.dnsbl.sorbs.net'
